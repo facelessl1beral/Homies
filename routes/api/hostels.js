@@ -5,6 +5,13 @@ const jwt = require('jsonwebtoken');
 const { check, validationResult } = require('express-validator');
 const Hostel = require('../../models/Hostel');
 const User = require('../../models/User');
+const nodemailer = require('nodemailer');
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: process.env.SMTP_PORT,
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+});
 
 // Register hostel
 router.post('/register', [
@@ -171,6 +178,56 @@ router.post('/matches/confirm', async (req, res) => {
       assignedHostel: hostel.name
     });
 
+    // Fetch both students for email
+    const studentA = await User.findById(studentAId);
+    const studentB = await User.findById(studentBId);
+
+
+    // Email to students — wrapped so SMTP failure doesn't block booking
+    try {
+      await transporter.sendMail({
+        from: `"Homies" <${process.env.SMTP_USER}>`,
+      to: studentA.email,
+      subject: `Your room is confirmed — ${hostel.name}`,
+      html: `
+        <h2>Your Homies booking is confirmed! 🎉</h2>
+        <p>Hi ${studentA.name || studentA.firstName},</p>
+        <p>Your room has been confirmed at <strong>${hostel.name}</strong>.</p>
+        <table style="border-collapse:collapse;margin:16px 0">
+          <tr><td style="padding:6px 16px 6px 0;color:#888">Room</td><td><strong>${room.roomNumber}</strong></td></tr>
+          <tr><td style="padding:6px 16px 6px 0;color:#888">Hostel</td><td><strong>${hostel.name}</strong></td></tr>
+          <tr><td style="padding:6px 16px 6px 0;color:#888">Roommate</td><td><strong>${studentB.name || studentB.firstName}</strong></td></tr>
+          <tr><td style="padding:6px 16px 6px 0;color:#888">Roommate email</td><td>${studentB.email}</td></tr>
+        </table>
+        <p>Please contact your hostel to arrange move-in details.</p>
+        <p style="color:#888;font-size:0.85rem">— The Homies Team</p>
+      `
+    });
+
+    // Email to Student B
+      await transporter.sendMail({
+      from: `"Homies" <${process.env.SMTP_USER}>`,
+      to: studentB.email,
+      subject: `Your room is confirmed — ${hostel.name}`,
+      html: `
+        <h2>Your Homies booking is confirmed! 🎉</h2>
+        <p>Hi ${studentB.name || studentB.firstName},</p>
+        <p>Your room has been confirmed at <strong>${hostel.name}</strong>.</p>
+        <table style="border-collapse:collapse;margin:16px 0">
+          <tr><td style="padding:6px 16px 6px 0;color:#888">Room</td><td><strong>${room.roomNumber}</strong></td></tr>
+          <tr><td style="padding:6px 16px 6px 0;color:#888">Hostel</td><td><strong>${hostel.name}</strong></td></tr>
+          <tr><td style="padding:6px 16px 6px 0;color:#888">Roommate</td><td><strong>${studentA.name || studentA.firstName}</strong></td></tr>
+          <tr><td style="padding:6px 16px 6px 0;color:#888">Roommate email</td><td>${studentA.email}</td></tr>
+        </table>
+        <p>Please contact your hostel to arrange move-in details.</p>
+        <p style="color:#888;font-size:0.85rem">— The Homies Team</p>
+      `
+    });
+
+      console.log('📧 Confirmation emails sent to', studentA.email, 'and', studentB.email);
+    } catch (emailErr) {
+      console.warn('⚠️  Email failed (check SMTP credentials):', emailErr.message);
+    }
     res.json({ msg: 'Booking confirmed', room: room.roomNumber, hostel: hostel.name });
   } catch (err) {
     console.error(err.message);

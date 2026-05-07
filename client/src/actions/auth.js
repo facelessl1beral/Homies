@@ -45,10 +45,12 @@ export const register = ({ firstName,lastName, email, password }) => async dispa
   try {
     const res = await axios.post('/api/users', body, config);
 
+    dispatch({ type: CLEAR_PROFILE });
     dispatch({
       type: REGISTER_SUCCESS,
       payload: res.data
     });
+    dispatch(loadUser());
   } catch (err) {
     const errors = err.response.data.errors;
 
@@ -75,6 +77,7 @@ export const login = (email, password) => async dispatch => {
   try {
     const res = await axios.post('/api/auth', body, config);
 
+    dispatch({ type: CLEAR_PROFILE });
     dispatch({
       type: LOGIN_SUCCESS,
       payload: res.data

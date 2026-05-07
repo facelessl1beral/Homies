@@ -46,6 +46,8 @@ const Register = ({ setAlert, register, logout, isAuthenticated }) => {
     );
   }
 
+  const inputCss = { background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', width: '100%', fontSize: '0.95rem' };
+
   return (
     <Fragment>
       <h1 className='large text-primary'>Sign Up</h1>
@@ -56,6 +58,7 @@ const Register = ({ setAlert, register, logout, isAuthenticated }) => {
         <div className='form-group'>
           <input
             type='text'
+            style={inputCss}
             placeholder='First Name'
             name='firstName'
             value={firstName}
@@ -66,6 +69,7 @@ const Register = ({ setAlert, register, logout, isAuthenticated }) => {
         <div className='form-group'>
           <input
             type='text'
+            style={inputCss}
             placeholder='Last Name'
             name='lastName'
             value={lastName}
@@ -76,6 +80,7 @@ const Register = ({ setAlert, register, logout, isAuthenticated }) => {
         <div className='form-group'>
           <input
             type='email'
+            style={inputCss}
             placeholder='Email Address'
             name='email'
             value={email}

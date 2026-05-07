@@ -14,7 +14,6 @@ if (localStorage.token) {
 }
 
 export const ThemeContext = createContext();
-
 export const useTheme = () => useContext(ThemeContext);
 
 const App = () => {
@@ -36,8 +35,8 @@ const App = () => {
   };
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
-      <Provider store={store}>
+    <Provider store={store}>
+      <ThemeContext.Provider value={{ theme, toggleTheme }}>
         <Router>
           <Fragment>
             <Navbar />
@@ -47,8 +46,8 @@ const App = () => {
             </Switch>
           </Fragment>
         </Router>
-      </Provider>
-    </ThemeContext.Provider>
+      </ThemeContext.Provider>
+    </Provider>
   );
 };
 

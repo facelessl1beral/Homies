@@ -1615,3 +1615,72 @@ html, body, #root {
   border-color: rgba(124,58,237,0.15) !important;
   color: var(--text-primary) !important;
 }
+
+/* ============================================
+   BOOKING STRIP & LIFESTYLE SNAPSHOT
+   ============================================ */
+.booking-strip {
+  margin-top: 1.25rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem 1.75rem;
+}
+.booking-strip h3 {
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  margin-bottom: 1rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.booking-strip p {
+  color: var(--text-primary);
+  margin: 0;
+}
+.booking-strip .booking-label {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+.booking-strip .booking-sub {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+.booking-badge {
+  margin-left: auto;
+  border-radius: var(--radius-full);
+  padding: 4px 14px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #fff;
+  white-space: nowrap;
+}
+.booking-badge.confirmed { background: var(--success); }
+.booking-badge.pending   { background: var(--warning); }
+
+.lifestyle-strip {
+  margin-top: 1.25rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem 1.75rem;
+}
+.lifestyle-strip h3 {
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  margin-bottom: 1rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.lifestyle-strip .tag {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.8rem;
+  border-radius: var(--radius-full);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
