@@ -47,27 +47,44 @@ router.get('/recommended', auth, async (req, res) => {
       _id: { $ne: req.user.id } 
     }).select('-password');
 
-    const score = (current, other) => {
-      let s = 0;
-      const fields = [
-        ['roomieCountry', 'country'],
-        ['roomieGender',  'gender'],
-        ['roomieAge',     'age'],
-        ['roomieUniv',    'univ'],
-        ['roomieCourse',  'course'],
-        ['roomieSem',     'sem'],
-        ['roomieFood',    'food'],
-        ['roomieSmoke',   'smoke'],
-        ['roomieDrink',   'drink'],
-        ['roomieCook',    'cook'],
-      ];
-      fields.forEach(([pref, trait]) => {
-        if (current[pref] === "Don't Care" || current[pref] === other[trait])   s += 50;
-        if (other[pref]    === "Don't Care" || other[pref]    === current[trait]) s += 50;
+    // Matching Engine V2 — weighted category scoring
+    // Categories: Lifestyle 40%, Habits 20%, Academic 15%, Demographic 10%, Hostel 15%
+    const categoryScore = (current, other, fields) => {
+      if (fields.length === 0) return 0;
+      let matched = 0;
+      let total = 0;
+      fields.forEach(field => {
+        const a = current[field];
+        const b = other[field];
+        if (a || b) {
+          total++;
+          if (a && b && a === b) matched++;
+        }
       });
-      // Bonus for shared hostel preference
-      if (current.preferredHostel && current.preferredHostel === other.preferredHostel) s += 100;
-      return s * 100 / 1100;
+      return total === 0 ? 0 : (matched / total) * 100;
+    };
+
+    const score = (current, other) => {
+      const lifestyleFields   = ['sleepSchedule', 'cleanliness', 'studyPref', 'social', 'noise', 'guests', 'exercise'];
+      const habitsFields      = ['food', 'smoke', 'drink', 'cook'];
+      const academicFields    = ['univ', 'course', 'sem'];
+      const demographicFields = ['gender', 'age', 'country'];
+      const hostelFields      = ['preferredHostel', 'roomType', 'floorPref', 'bathroomPref', 'proximityPref'];
+
+      const lifestyleScore   = categoryScore(current, other, lifestyleFields);
+      const habitsScore      = categoryScore(current, other, habitsFields);
+      const academicScore    = categoryScore(current, other, academicFields);
+      const demographicScore = categoryScore(current, other, demographicFields);
+      const hostelScore      = categoryScore(current, other, hostelFields);
+
+      const finalScore =
+        (lifestyleScore   * 0.40) +
+        (habitsScore      * 0.20) +
+        (academicScore    * 0.15) +
+        (demographicScore * 0.10) +
+        (hostelScore       * 0.15);
+
+      return Math.round(finalScore);
     };
 
     const result = otherUsers.map(other => {
