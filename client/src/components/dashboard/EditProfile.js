@@ -149,7 +149,7 @@ const STEPS = [
     title: 'Your profile photo',
     subtitle: 'A face to the name goes a long way',
     fields: [
-      { name: 'avatar', label: 'Photo URL', type: 'text', placeholder: 'https://... (link to your photo)' },
+
     ]
   },
   {
@@ -188,6 +188,8 @@ const EditProfile = ({
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState('forward');
   const [animating, setAnimating] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const [formData, setFormData] = useState({
     displayName: '', gender: '', age: '', city: '', country: '',
     univ: '', sem: '', course: '', food: '', smoke: '', drink: '',
@@ -277,19 +279,36 @@ const EditProfile = ({
 
   if (loading) return <Spinner />;
 
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadError("");
+    try {
+      const formDataUpload = new FormData();
+      formDataUpload.append("avatar", file);
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/upload", { method: "POST", headers: { "x-auth-token": token }, body: formDataUpload });
+      const data = await res.json();
+      if (data.url) { setFormData(f => ({ ...f, avatar: data.url })); }
+      else { setUploadError("Upload failed. Please try again."); }
+    } catch (err) { setUploadError("Upload failed. Please try again."); }
+    finally { setUploading(false); }
+  };
+
   return (
     <>
       <style>{`
 
         .qz-wrap {
           min-height: 100vh;
-          background: #0a0a0f;
+          background: var(--bg-primary);
           display: flex;
           flex-direction: column;
           align-items: center;
           padding: 0 0 80px 0;
           font-family: 'Satoshi', sans-serif;
-          color: #f0eeea;
+          color: var(--text-primary);
         }
 
         .qz-top {
@@ -301,7 +320,7 @@ const EditProfile = ({
         .qz-progress-track {
           width: 100%;
           height: 3px;
-          background: #1e1e2e;
+          background: var(--bg-secondary);
           border-radius: 99px;
           margin-bottom: 10px;
           overflow: hidden;
@@ -316,7 +335,7 @@ const EditProfile = ({
 
         .qz-step-label {
           font-size: 11px;
-          color: #6b6b8a;
+          color: var(--text-secondary);
           letter-spacing: 0.08em;
           text-transform: uppercase;
           font-weight: 500;
@@ -345,13 +364,13 @@ const EditProfile = ({
           font-size: clamp(28px, 5vw, 42px);
           font-weight: 700;
           line-height: 1.1;
-          color: #f0eeea;
+          color: var(--text-primary);
           margin: 0 0 8px 0;
         }
 
         .qz-subtitle {
           font-size: 15px;
-          color: #8b8ba8;
+          color: var(--text-secondary);
           margin: 0 0 36px 0;
           font-weight: 400;
         }
@@ -364,7 +383,7 @@ const EditProfile = ({
           display: block;
           font-size: 13px;
           font-weight: 500;
-          color: #9898b8;
+          color: var(--text-muted);
           margin-bottom: 10px;
           letter-spacing: 0.04em;
           text-transform: uppercase;
@@ -372,12 +391,12 @@ const EditProfile = ({
 
         .qz-input {
           width: 100%;
-          background: #13131f;
+          background: var(--bg-secondary);
           border: 1.5px solid #1e1e30;
           border-radius: 12px;
           padding: 14px 16px;
           font-size: 15px;
-          color: #f0eeea;
+          color: var(--text-primary);
           font-family: 'Satoshi', sans-serif;
           outline: none;
           transition: border-color 0.2s;
@@ -389,7 +408,7 @@ const EditProfile = ({
         }
 
         .qz-input::placeholder {
-          color: #3a3a55;
+          color: var(--text-muted);
         }
 
         .qz-textarea {
@@ -407,8 +426,8 @@ const EditProfile = ({
           padding: 10px 18px;
           border-radius: 99px;
           border: 1.5px solid #1e1e30;
-          background: #13131f;
-          color: #8b8ba8;
+          background: var(--bg-secondary);
+          color: var(--text-secondary);
           font-size: 14px;
           font-family: 'Satoshi', sans-serif;
           font-weight: 500;
@@ -442,14 +461,14 @@ const EditProfile = ({
           width: 88px;
           height: 88px;
           border-radius: 50%;
-          background: #13131f;
+          background: var(--bg-secondary);
           border: 2px dashed #2e2e45;
           display: flex;
           align-items: center;
           justify-content: center;
           font-size: 28px;
           margin-bottom: 16px;
-          color: #3a3a55;
+          color: var(--text-muted);
         }
 
         .qz-nav {
@@ -457,7 +476,7 @@ const EditProfile = ({
           bottom: 0;
           left: 0;
           right: 0;
-          background: #0a0a0f;
+          background: var(--bg-primary);
           border-top: 1px solid #1a1a2e;
           padding: 16px 24px;
           display: flex;
@@ -475,7 +494,7 @@ const EditProfile = ({
         .qz-btn-back {
           background: transparent;
           border: 1.5px solid #1e1e30;
-          color: #6b6b8a;
+          color: var(--text-secondary);
           padding: 12px 24px;
           border-radius: 99px;
           font-size: 14px;
@@ -486,8 +505,8 @@ const EditProfile = ({
         }
 
         .qz-btn-back:hover {
-          border-color: #3a3a55;
-          color: #9898b8;
+          border-color: var(--text-muted);
+          color: var(--text-muted);
         }
 
         .qz-btn-next {
@@ -523,7 +542,7 @@ const EditProfile = ({
           width: 6px;
           height: 6px;
           border-radius: 99px;
-          background: #1e1e30;
+          background: var(--bg-tertiary);
           transition: all 0.25s;
         }
 
@@ -565,12 +584,31 @@ const EditProfile = ({
           <p className="qz-subtitle">{currentStep.subtitle}</p>
 
           {currentStep.id === 'photo' && (
-            <div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
               {formData.avatar ? (
                 <img src={formData.avatar} alt="preview" className="qz-avatar-preview" />
               ) : (
                 <div className="qz-avatar-placeholder">?</div>
               )}
+              <label style={{
+                display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+                padding: '0.6rem 1.4rem', borderRadius: 'var(--radius-full)',
+                background: 'var(--accent-gradient)', color: '#fff',
+                fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer',
+                border: 'none', transition: 'opacity 0.2s'
+              }}>
+                {uploading ? 'Uploading...' : formData.avatar ? '📷 Change photo' : '📷 Choose photo'}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handlePhotoUpload}
+                  style={{ display: 'none' }}
+                  disabled={uploading}
+                />
+              </label>
+              {uploadError && <p style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{uploadError}</p>}
+              {uploading && <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Uploading your photo...</p>}
+              {formData.avatar && <p style={{ color: 'var(--success)', fontSize: '0.85rem' }}>✓ Photo uploaded successfully</p>}
             </div>
           )}
 

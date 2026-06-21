@@ -105,6 +105,38 @@ const Dashboard = ({
             </div>
           </div>
 
+          {/* Cold start nudge — show when lifestyle profile is incomplete */}
+          {(() => {
+            const lifestyleFields = ['sleepSchedule', 'cleanliness', 'studyPref', 'social', 'noise', 'guests', 'exercise'];
+            const filled = lifestyleFields.filter(f => profile[f]).length;
+            if (filled < 3) return (
+              <div style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)', borderRadius: 'var(--radius-lg)', padding: '1rem 1.5rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '1.5rem' }}>✨</span>
+                <div>
+                  <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)' }}>Your profile is {Math.round((filled/7)*100)}% complete</p>
+                  <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-secondary)' }}>Add at least {3 - filled} more lifestyle preference{3 - filled > 1 ? 's' : ''} to get accurate match scores</p>
+                </div>
+                <Link to="/edit-profile" className="btn btn-primary" style={{ marginLeft: 'auto', fontSize: '0.85rem', padding: '0.5rem 1.1rem' }}>Complete profile →</Link>
+              </div>
+            );
+            return null;
+          })()}
+          {/* Cold start nudge — show when lifestyle profile is incomplete */}
+          {(() => {
+            const lifestyleFields = ['sleepSchedule', 'cleanliness', 'studyPref', 'social', 'noise', 'guests', 'exercise'];
+            const filled = lifestyleFields.filter(f => profile[f]).length;
+            if (filled < 3) return (
+              <div style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)', borderRadius: 'var(--radius-lg)', padding: '1rem 1.5rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '1.5rem' }}>✨</span>
+                <div>
+                  <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)' }}>Your profile is {Math.round((filled/7)*100)}% complete</p>
+                  <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-secondary)' }}>Add at least {3 - filled} more lifestyle preference{3 - filled > 1 ? 's' : ''} to get accurate match scores</p>
+                </div>
+                <Link to="/edit-profile" className="btn btn-primary" style={{ marginLeft: 'auto', fontSize: '0.85rem', padding: '0.5rem 1.1rem' }}>Complete profile →</Link>
+              </div>
+            );
+            return null;
+          })()}
           {/* Booking status strip */}
           <div className="booking-strip">
             <h3>Hostel Booking</h3>

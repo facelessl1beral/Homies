@@ -1,15 +1,18 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "Homies",
+  "name": "Homies — Find Your Roommate",
+  "description": "Weighted compatibility matching for KYU students. Find your perfect hostel roommate.",
   "icons": [
     {
-      "src": "favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/x-icon"
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
   ],
-  "start_url": ".",
+  "start_url": "/",
   "display": "standalone",
-  "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "theme_color": "#7c3aed",
+  "background_color": "#0a0a0f",
+  "orientation": "portrait-primary"
 }

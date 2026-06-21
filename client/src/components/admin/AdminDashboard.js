@@ -11,6 +11,8 @@ const AdminDashboard = ({ token }) => {
   const [formError, setFormError] = useState('');
   const [batchCount, setBatchCount] = useState(1);
   const [confirming, setConfirming] = useState(null);
+  const [expandedRoom, setExpandedRoom] = useState(null);
+  const [occupantNames, setOccupantNames] = useState({});
   const [selectedRoom, setSelectedRoom] = useState('');
 
   const headers = { 'x-auth-token': token };
@@ -214,14 +216,42 @@ const AdminDashboard = ({ token }) => {
             ? <p style={{ color: 'var(--text-muted)' }}>No rooms added yet.</p>
             : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px,1fr))', gap: '16px' }}>
                 {rooms.map(room => (
-                  <div key={room._id} style={{ background: 'var(--bg-card)', border: `1px solid var(--border)`, borderLeft: `4px solid ${statusColor(room.status)}`, borderRadius: 'var(--radius-md)', padding: '1rem' }}>
+                  <div key={room._id}
+                    onClick={async () => {
+                      const newId = expandedRoom === room._id ? null : room._id;
+                      setExpandedRoom(newId);
+                      if (newId && room.occupants?.length > 0) {
+                        try {
+                          const res = await axios.get('/api/hostels/matches', { headers });
+                          const allStudents = res.data.flatMap(m => [m.studentA, m.studentB]);
+                          const nameMap = {};
+                          allStudents.forEach(s => { if (s?._id) nameMap[s._id] = s.name || s.firstName || s.email; });
+                          setOccupantNames(prev => ({ ...prev, ...nameMap }));
+                        } catch(e) {}
+                      }
+                    }}
+                    style={{ background: 'var(--bg-card)', border: `1px solid ${expandedRoom === room._id ? 'var(--accent-purple)' : 'var(--border)'}`, borderLeft: `4px solid ${statusColor(room.status)}`, borderRadius: 'var(--radius-md)', padding: '1rem', cursor: 'pointer', transition: 'border-color 0.2s' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <h5 style={{ margin: 0, color: 'var(--text-primary)' }}>Room {room.roomNumber}</h5>
-                      <button onClick={() => handleDelete(room._id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
+                      <button onClick={e => { e.stopPropagation(); handleDelete(room._id); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
                     </div>
                     <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '8px 0 4px' }}>{room.type} · {room.floor}</p>
                     <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '0 0 8px' }}>{room.bathroom} · Cap: {room.capacity}</p>
                     <span style={{ fontSize: '0.78rem', padding: '2px 10px', borderRadius: 'var(--radius-full)', background: statusColor(room.status), color: '#fff' }}>{room.status}</span>
+                    {expandedRoom === room._id && (
+                      <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border)' }}>
+                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Occupants ({room.occupants?.length || 0}/{room.capacity})</p>
+                        {room.occupants && room.occupants.length > 0
+                          ? room.occupants.map((id, i) => (
+                              <p key={i} style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: '2px 0' }}>👤 {occupantNames[id] || id.slice(0,8) + '...'}</p>
+                            ))
+                          : <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>No occupants yet</p>
+                        }
+                        {room.proximity && room.proximity !== 'None' && (
+                          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '4px' }}>📍 Near {room.proximity}</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

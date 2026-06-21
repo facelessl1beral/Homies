@@ -87,7 +87,20 @@ router.get('/recommended', auth, async (req, res) => {
       return Math.round(finalScore);
     };
 
-    const result = otherUsers.map(other => {
+    // Dealbreaker pre-filter — hard incompatibilities excluded before scoring
+    const passesDealbreakers = (current, other) => {
+      // Smoking dealbreaker — non-smoker who cares vs smoker
+      if (current.smoke === 'Non-smoker' && other.smoke === 'Smoker') return false;
+      if (other.smoke === 'Non-smoker' && current.smoke === 'Smoker') return false;
+      // Gender preference dealbreaker
+      if (current.roomieGender && current.roomieGender !== 'No preference' && current.roomieGender !== other.gender) return false;
+      if (other.roomieGender && other.roomieGender !== 'No preference' && other.roomieGender !== current.gender) return false;
+      return true;
+    };
+
+    const filteredUsers = otherUsers.filter(other => passesDealbreakers(currentUser, other));
+
+    const result = filteredUsers.map(other => {
       const obj = other.toObject();
       obj.score = score(currentUser, other);
       if (currentUser.rejected?.includes(other._id.toString())) {
