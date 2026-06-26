@@ -115,7 +115,6 @@ router.get('/matches', async (req, res) => {
   }
 });
 
-module.exports = router;
 
 // Add a room to this hostel
 router.post('/rooms', async (req, res) => {
@@ -224,7 +223,7 @@ router.post('/matches/confirm', async (req, res) => {
       `
     });
 
-      console.log('📧 Confirmation emails sent to', studentA.email, 'and', studentB.email);
+      // Email sent successfully
     } catch (emailErr) {
       console.warn('⚠️  Email failed (check SMTP credentials):', emailErr.message);
     }

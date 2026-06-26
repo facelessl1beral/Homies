@@ -71,9 +71,6 @@
   padding: 0;
 }
 
-html {
-  scroll-behavior: smooth;
-}
 
 body {
   font-family: var(--font-body);
@@ -85,6 +82,7 @@ body {
   min-height: 100vh;
 }
 html {
+  scroll-behavior: smooth;
   background: var(--bg-primary);
   transition: background var(--transition);
 }

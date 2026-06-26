@@ -125,7 +125,6 @@ router.get('/recommended', auth, async (req, res) => {
 // @desc    Create or update user profile
 // @access  Private
 router.post('/', auth, async (req, res) => {
-  console.log('PROFILE POST BODY:', JSON.stringify(req.body, null, 2));
   try {
     const fields = [
       'avatar','name','gender','age','city','country','univ','sem','course',
