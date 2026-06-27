@@ -2263,3 +2263,15 @@ html, body {
   .hostels-grid { grid-template-columns: 1fr; }
   .hostels-section { padding: 3rem 1rem; }
 }
+
+/* ============================================
+   ADMIN ROOMS GRID — wider cards
+   ============================================ */
+.rooms-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+}
+@media (max-width: 768px) {
+  .rooms-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+}

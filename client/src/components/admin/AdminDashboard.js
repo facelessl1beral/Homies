@@ -58,6 +58,44 @@ const AdminDashboard = ({ token }) => {
     } catch (err) { setFormError('Failed to add room'); }
   };
 
+  const handleRemoveOccupant = async (roomId, studentId, studentName) => {
+    if (!window.confirm(`Remove ${studentName} from this room?`)) return;
+    try {
+      await axios.post('/api/hostels/rooms/remove-occupant', { roomId, studentId }, { headers });
+      setRooms(prev => prev.map(r => {
+        if (r._id === roomId) {
+          const newOccupants = r.occupants.filter(id => id !== studentId);
+          return { ...r, occupants: newOccupants, status: newOccupants.length === 0 ? 'available' : r.status };
+        }
+        return r;
+      }));
+      setOccupantDetails(prev => ({
+        ...prev,
+        [roomId]: (prev[roomId] || []).filter(o => o._id !== studentId)
+      }));
+    } catch (err) {
+      setError(err.response?.data?.msg || 'Failed to remove occupant');
+    }
+  };
+
+  const handleSwitchOccupant = async (studentId, studentName, fromRoomId) => {
+    const availableRooms = rooms.filter(r => r._id !== fromRoomId && r.status === 'available');
+    if (availableRooms.length === 0) { setError('No available rooms to switch to'); return; }
+    const options = availableRooms.map((r, i) => `${i + 1}. Room ${r.roomNumber} (${r.type})`).join('\n');
+    const choice = window.prompt(`Switch ${studentName} to which room?\n\n${options}\n\nEnter room number:`);
+    if (!choice) return;
+    const targetRoom = availableRooms.find(r => r.roomNumber === choice.trim());
+    if (!targetRoom) { setError('Room not found — enter the exact room number'); return; }
+    try {
+      await axios.post('/api/hostels/rooms/switch-occupant', { studentId, fromRoomId, toRoomId: targetRoom._id }, { headers });
+      alert(`${studentName} moved to Room ${targetRoom.roomNumber}`);
+      const res = await axios.get('/api/hostels/rooms', { headers });
+      setRooms(res.data);
+    } catch (err) {
+      setError(err.response?.data?.msg || 'Failed to switch room');
+    }
+  };
+
   const handleDelete = async (roomId) => {
     try {
       const res = await axios.delete(`/api/hostels/rooms/${roomId}`, { headers });
@@ -215,7 +253,7 @@ const AdminDashboard = ({ token }) => {
 
           {rooms.length === 0
             ? <p style={{ color: 'var(--text-muted)' }}>No rooms added yet.</p>
-            : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px,1fr))', gap: '16px' }}>
+            : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px,1fr))', gap: '16px' }}>
                 {rooms.map(room => (
                   <div key={room._id}
                     onClick={async () => {
@@ -241,9 +279,17 @@ const AdminDashboard = ({ token }) => {
                         <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Occupants ({room.occupants?.length || 0}/{room.capacity})</p>
                         {room.occupants && room.occupants.length > 0
                           ? (occupantDetails[room._id] || []).map((occ, i) => (
-                              <div key={i} style={{ marginBottom: '6px' }}>
-                                <p style={{ fontSize: '0.85rem', color: 'var(--text-primary)', margin: 0, fontWeight: 600 }}>👤 {occ.name || occ.firstName}</p>
-                                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>{occ.email} · {occ.course} {occ.sem}</p>
+                              <div key={i} style={{ marginBottom: '8px', padding: '6px 8px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                  <div>
+                                    <p style={{ fontSize: '0.85rem', color: 'var(--text-primary)', margin: 0, fontWeight: 600 }}>👤 {occ.name || occ.firstName}</p>
+                                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '2px 0 0' }}>{occ.email} · {occ.course} {occ.sem}</p>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '4px', flexShrink: 0, marginLeft: '8px' }}>
+                                    <button onClick={e => { e.stopPropagation(); handleSwitchOccupant(occ._id, occ.name || occ.firstName, room._id); }} style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: 'var(--radius-full)', border: '1px solid var(--accent-purple)', background: 'transparent', color: 'var(--accent-purple)', cursor: 'pointer' }}>⇄ Switch</button>
+                                    <button onClick={e => { e.stopPropagation(); handleRemoveOccupant(room._id, occ._id, occ.name || occ.firstName); }} style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: 'var(--radius-full)', border: '1px solid #dc2626', background: 'transparent', color: '#dc2626', cursor: 'pointer' }}>✕ Remove</button>
+                                  </div>
+                                </div>
                               </div>
                             ))
                           : <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>No occupants yet</p>

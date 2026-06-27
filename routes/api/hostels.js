@@ -262,6 +262,62 @@ router.get('/rooms/:roomId/occupants', async (req, res) => {
   }
 });
 
+// Remove a student from a room
+router.post('/rooms/remove-occupant', async (req, res) => {
+  const token = req.header('x-auth-token');
+  if (!token) return res.status(401).json({ msg: 'No token' });
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (!decoded.hostel || decoded.hostel.role !== 'admin') return res.status(403).json({ msg: 'Forbidden' });
+    const { roomId, studentId } = req.body;
+    const hostel = await Hostel.findById(decoded.hostel.id);
+    const room = hostel.rooms.id(roomId);
+    if (!room) return res.status(404).json({ msg: 'Room not found' });
+    room.occupants = room.occupants.filter(id => id.toString() !== studentId.toString());
+    if (room.occupants.length === 0) room.status = 'available';
+    await hostel.save();
+    await User.findByIdAndUpdate(studentId, {
+      bookingStatus: 'none',
+      assignedRoom: '',
+      assignedHostel: ''
+    });
+    res.json({ msg: 'Student removed from room', room });
+  } catch (err) {
+    res.status(500).send('Server error');
+  }
+});
+
+// Switch a student to a different room
+router.post('/rooms/switch-occupant', async (req, res) => {
+  const token = req.header('x-auth-token');
+  if (!token) return res.status(401).json({ msg: 'No token' });
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (!decoded.hostel || decoded.hostel.role !== 'admin') return res.status(403).json({ msg: 'Forbidden' });
+    const { studentId, fromRoomId, toRoomId } = req.body;
+    const hostel = await Hostel.findById(decoded.hostel.id);
+    const fromRoom = hostel.rooms.id(fromRoomId);
+    const toRoom = hostel.rooms.id(toRoomId);
+    if (!fromRoom || !toRoom) return res.status(404).json({ msg: 'Room not found' });
+    if (toRoom.status !== 'available') return res.status(400).json({ msg: `Room ${toRoom.roomNumber} is not available` });
+    // Remove from old room
+    fromRoom.occupants = fromRoom.occupants.filter(id => id.toString() !== studentId.toString());
+    if (fromRoom.occupants.length === 0) fromRoom.status = 'available';
+    // Add to new room
+    toRoom.occupants.push(studentId);
+    if (toRoom.occupants.length >= toRoom.capacity) toRoom.status = 'pending';
+    await hostel.save();
+    // Update student
+    await User.findByIdAndUpdate(studentId, {
+      assignedRoom: toRoom.roomNumber,
+      assignedHostel: hostel.name
+    });
+    res.json({ msg: `Student moved to Room ${toRoom.roomNumber}`, toRoom });
+  } catch (err) {
+    res.status(500).send('Server error');
+  }
+});
+
 // Delete a room
 router.delete('/rooms/:roomId', async (req, res) => {
   const token = req.header('x-auth-token');
