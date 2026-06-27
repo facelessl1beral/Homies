@@ -1912,3 +1912,250 @@ html, body {
 .mp-trait { color: var(--text-secondary) !important; background: var(--bg-tertiary) !important; }
 .mp-bar-label { color: var(--text-muted) !important; }
 .mp-demo-footer { color: var(--text-muted) !important; }
+
+/* ============================================
+   MOBILE-FIRST RESPONSIVE — FULL OVERHAUL
+   ============================================ */
+
+/* ── Tablet (768px and below) ── */
+@media (max-width: 768px) {
+
+  /* Container */
+  .container {
+    padding: 0 1rem;
+    margin-top: calc(var(--navbar-height) + 1rem);
+  }
+
+  /* Dashboard */
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-header h1 {
+    font-size: 1.6rem;
+  }
+  .profile-card {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 1.25rem;
+  }
+  .profile-card .round-img {
+    width: 80px;
+    height: 80px;
+  }
+  .booking-strip {
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+  }
+  .lifestyle-strip {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  /* Swipe cards */
+  .swipe-container {
+    padding: 1rem 0.75rem 5rem;
+  }
+  .swipe-deck {
+    width: 90vw;
+    max-width: 360px;
+    height: 65vw;
+    max-height: 440px;
+  }
+  .swipe-card {
+    width: 90vw;
+    max-width: 360px;
+  }
+  .swipe-header h1 {
+    font-size: 1.4rem;
+  }
+  .swipe-actions {
+    gap: 1.5rem;
+  }
+  .swipe-btn {
+    width: 56px;
+    height: 56px;
+    font-size: 1.4rem;
+  }
+
+  /* Admin dashboard */
+  .admin-tabs {
+    gap: 0.5rem;
+  }
+  .rooms-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .matches-list {
+    gap: 0.75rem;
+  }
+
+  /* Auth pages */
+  .auth-form {
+    padding: 1.5rem 1rem;
+    margin: 1rem;
+  }
+
+  /* Profile pages */
+  .profile-view {
+    flex-direction: column;
+  }
+  .profile-sidebar {
+    width: 100%;
+  }
+
+  /* People page */
+  .profiles-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+
+  /* Footer */
+  .footer-inner {
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+  .footer-brand {
+    grid-column: 1 / -1;
+  }
+  .footer-bottom {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+}
+
+/* ── Mobile (480px and below) ── */
+@media (max-width: 480px) {
+
+  /* Base */
+  body {
+    font-size: 0.95rem;
+  }
+
+  /* Navbar */
+  .hm-nav {
+    padding: 0 1rem;
+  }
+  .hm-nav-links {
+    display: none;
+  }
+
+  /* Dashboard */
+  .dashboard-header h1 {
+    font-size: 1.4rem;
+  }
+  .dashboard-header .lead {
+    font-size: 0.9rem;
+  }
+
+  /* Swipe cards */
+  .swipe-deck {
+    width: 95vw;
+    height: 70vw;
+    max-height: 400px;
+  }
+  .swipe-card {
+    width: 95vw;
+  }
+  .swipe-card-info {
+    padding: 0.75rem;
+  }
+  .swipe-card-name {
+    font-size: 1.1rem;
+  }
+  .swipe-actions {
+    gap: 1.25rem;
+  }
+  .swipe-btn {
+    width: 52px;
+    height: 52px;
+    font-size: 1.25rem;
+  }
+
+  /* Admin rooms grid */
+  .rooms-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* People grid */
+  .profiles-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Buttons */
+  .btn-lg {
+    padding: 0.7rem 1.5rem;
+    font-size: 0.95rem;
+    width: 100%;
+    text-align: center;
+  }
+  .buttons {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  /* Landing */
+  .landing-eyebrow {
+    font-size: 0.7rem;
+  }
+  .landing-stats {
+    gap: 1.25rem;
+  }
+  .landing-stat-num {
+    font-size: 1.6rem;
+  }
+
+  /* EditProfile questionnaire */
+  .qz-card {
+    padding: 1.25rem 1rem;
+    margin: 0 0.5rem;
+  }
+  .qz-pills {
+    gap: 0.5rem;
+  }
+  .qz-pill {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+  .qz-input {
+    font-size: 1rem;
+    padding: 0.75rem 1rem;
+  }
+  .qz-btn-next {
+    width: 100%;
+  }
+
+  /* Footer */
+  .footer-inner {
+    grid-template-columns: 1fr;
+  }
+  .hiw-grid {
+    grid-template-columns: 1fr;
+  }
+  .hiw-card {
+    padding: 1.1rem;
+  }
+
+  /* Match score badge */
+  .score-badge {
+    font-size: 0.8rem;
+    padding: 0.2rem 0.6rem;
+  }
+}
+
+/* ── Small phones (375px and below) ── */
+@media (max-width: 375px) {
+  .swipe-deck {
+    width: 98vw;
+  }
+  .swipe-card {
+    width: 98vw;
+  }
+  .hm-nav-logo-text {
+    font-size: 1rem;
+  }
+  .landing-headline {
+    font-size: clamp(1.6rem, 8vw, 2rem);
+  }
+}
