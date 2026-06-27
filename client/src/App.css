@@ -46,13 +46,13 @@
 [data-theme="light"] {
   --bg-primary:    #f8f7ff;
   --bg-secondary:  #ffffff;
-  --bg-tertiary:   #f0effe;
+  --bg-tertiary:   #ede9fe;
   --bg-card:       #ffffff;
   --bg-glass:      rgba(255, 255, 255, 0.85);
 
   --text-primary:  #0f0f1a;
-  --text-secondary:#5a5a7a;
-  --text-muted:    #9898b8;
+  --text-secondary:#3a3a5c;
+  --text-muted:    #6b6b8a;
 
   --border:        #e8e4ff;
   --border-hover:  #c4b5fd;
@@ -1870,3 +1870,45 @@ body {
 html, body {
   background: var(--bg-primary) !important;
 }
+
+/* ============================================
+   LANDING PAGE — TEXT VISIBILITY ON PHOTO BG
+   ============================================ */
+.landing .landing-stat-label {
+  color: rgba(255,255,255,0.75);
+  text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+.landing .landing-sub {
+  color: rgba(255,255,255,0.85);
+  text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.landing .landing-hint {
+  color: rgba(255,255,255,0.65);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.landing .landing-hint a {
+  color: rgba(255,255,255,0.9);
+  text-decoration: underline;
+}
+[data-theme="light"] .landing .landing-stat-label {
+  color: rgba(15,10,30,0.75);
+  text-shadow: 0 1px 3px rgba(255,255,255,0.5);
+}
+[data-theme="light"] .landing .landing-sub {
+  color: rgba(15,10,30,0.85);
+  text-shadow: 0 1px 3px rgba(255,255,255,0.4);
+}
+[data-theme="light"] .landing .landing-hint {
+  color: rgba(15,10,30,0.65);
+  text-shadow: none;
+}
+
+/* MatchPreview demo card — ensure readable in both modes */
+.mp-card {
+  background: var(--bg-card) !important;
+}
+.mp-name { color: var(--text-primary) !important; }
+.mp-course { color: var(--text-secondary) !important; }
+.mp-trait { color: var(--text-secondary) !important; background: var(--bg-tertiary) !important; }
+.mp-bar-label { color: var(--text-muted) !important; }
+.mp-demo-footer { color: var(--text-muted) !important; }

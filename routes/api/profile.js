@@ -127,7 +127,7 @@ router.get('/recommended', auth, async (req, res) => {
 router.post('/', auth, async (req, res) => {
   try {
     const fields = [
-      'avatar','name','gender','age','city','country','univ','sem','course',
+      'name','gender','age','city','country','univ','sem','course',
       'sleepSchedule','cleanliness','studyPref','social','noise','guests','exercise',
       'food','smoke','drink','cook','notes','linkedin',
       'roomieGender','roomieAge','roomieCountry','roomieUniv',

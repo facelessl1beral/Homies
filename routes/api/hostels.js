@@ -234,6 +234,25 @@ router.post('/matches/confirm', async (req, res) => {
   }
 });
 
+// Get occupant details for a room
+router.get('/rooms/:roomId/occupants', async (req, res) => {
+  const token = req.header('x-auth-token');
+  if (!token) return res.status(401).json({ msg: 'No token' });
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const hostel = await Hostel.findById(decoded.hostel.id);
+    const room = hostel.rooms.id(req.params.roomId);
+    if (!room) return res.status(404).json({ msg: 'Room not found' });
+    const occupants = await User.find(
+      { _id: { $in: room.occupants } },
+      { name: 1, firstName: 1, lastName: 1, email: 1, course: 1, sem: 1 }
+    );
+    res.json(occupants);
+  } catch (err) {
+    res.status(500).send('Server error');
+  }
+});
+
 // Delete a room
 router.delete('/rooms/:roomId', async (req, res) => {
   const token = req.header('x-auth-token');

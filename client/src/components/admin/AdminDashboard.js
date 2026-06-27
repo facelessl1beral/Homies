@@ -13,6 +13,7 @@ const AdminDashboard = ({ token }) => {
   const [confirming, setConfirming] = useState(null);
   const [expandedRoom, setExpandedRoom] = useState(null);
   const [occupantNames, setOccupantNames] = useState({});
+  const [occupantDetails, setOccupantDetails] = useState({});
   const [selectedRoom, setSelectedRoom] = useState('');
 
   const headers = { 'x-auth-token': token };
@@ -70,7 +71,7 @@ const AdminDashboard = ({ token }) => {
       await axios.post('/api/hostels/matches/confirm', { studentAId, studentBId, roomId: selectedRoom }, { headers });
       setConfirming(null); setSelectedRoom('');
       fetchAll();
-    } catch (err) { setError('Failed to confirm booking'); }
+    } catch (err) { setError(err.response?.data?.msg || 'Failed to confirm booking'); }
   };
 
   const availableRooms = rooms.filter(r => r.status === 'available');
@@ -222,11 +223,8 @@ const AdminDashboard = ({ token }) => {
                       setExpandedRoom(newId);
                       if (newId && room.occupants?.length > 0) {
                         try {
-                          const res = await axios.get('/api/hostels/matches', { headers });
-                          const allStudents = res.data.flatMap(m => [m.studentA, m.studentB]);
-                          const nameMap = {};
-                          allStudents.forEach(s => { if (s?._id) nameMap[s._id] = s.name || s.firstName || s.email; });
-                          setOccupantNames(prev => ({ ...prev, ...nameMap }));
+                          const res = await axios.get(`/api/hostels/rooms/${newId}/occupants`, { headers });
+                          setOccupantDetails(prev => ({ ...prev, [newId]: res.data }));
                         } catch(e) {}
                       }
                     }}
@@ -242,8 +240,11 @@ const AdminDashboard = ({ token }) => {
                       <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border)' }}>
                         <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Occupants ({room.occupants?.length || 0}/{room.capacity})</p>
                         {room.occupants && room.occupants.length > 0
-                          ? room.occupants.map((id, i) => (
-                              <p key={i} style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: '2px 0' }}>👤 {occupantNames[id] || id.slice(0,8) + '...'}</p>
+                          ? (occupantDetails[room._id] || []).map((occ, i) => (
+                              <div key={i} style={{ marginBottom: '6px' }}>
+                                <p style={{ fontSize: '0.85rem', color: 'var(--text-primary)', margin: 0, fontWeight: 600 }}>👤 {occ.name || occ.firstName}</p>
+                                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>{occ.email} · {occ.course} {occ.sem}</p>
+                              </div>
                             ))
                           : <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>No occupants yet</p>
                         }

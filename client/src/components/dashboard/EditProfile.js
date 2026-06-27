@@ -392,7 +392,7 @@ const EditProfile = ({
         .qz-input {
           width: 100%;
           background: var(--bg-secondary);
-          border: 1.5px solid #1e1e30;
+          border: 1.5px solid var(--border);
           border-radius: 12px;
           padding: 14px 16px;
           font-size: 15px;
@@ -425,7 +425,7 @@ const EditProfile = ({
         .qz-pill {
           padding: 10px 18px;
           border-radius: 99px;
-          border: 1.5px solid #1e1e30;
+          border: 1.5px solid var(--border);
           background: var(--bg-secondary);
           color: var(--text-secondary);
           font-size: 14px;
@@ -438,13 +438,13 @@ const EditProfile = ({
 
         .qz-pill:hover {
           border-color: #7c3aed;
-          color: #c4b5fd;
+          color: var(--accent-purple);
         }
 
         .qz-pill.active {
           background: linear-gradient(135deg, #7c3aed22, #ec489922);
           border-color: #7c3aed;
-          color: #e0d7ff;
+          color: var(--accent-purple);
         }
 
         .qz-avatar-preview {
@@ -462,7 +462,7 @@ const EditProfile = ({
           height: 88px;
           border-radius: 50%;
           background: var(--bg-secondary);
-          border: 2px dashed #2e2e45;
+          border: 2px dashed var(--border);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -477,7 +477,7 @@ const EditProfile = ({
           left: 0;
           right: 0;
           background: var(--bg-primary);
-          border-top: 1px solid #1a1a2e;
+          border-top: 1px solid var(--border);
           padding: 16px 24px;
           display: flex;
           justify-content: space-between;
@@ -493,7 +493,7 @@ const EditProfile = ({
 
         .qz-btn-back {
           background: transparent;
-          border: 1.5px solid #1e1e30;
+          border: 1.5px solid var(--border);
           color: var(--text-secondary);
           padding: 12px 24px;
           border-radius: 99px;
@@ -553,7 +553,7 @@ const EditProfile = ({
 
         .qz-welcome {
           font-size: 13px;
-          color: #4a4a6a;
+          color: var(--text-secondary);
           margin-bottom: 32px;
         }
 
