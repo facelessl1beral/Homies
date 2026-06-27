@@ -4,6 +4,7 @@ import { connect } from 'react-redux';
 import PropTypes from 'prop-types';
 import AnimatedCounter from './AnimatedCounter';
 import HowItWorks from './HowItWorks';
+import HostelsSection from './HostelsSection';
 import Footer from './Footer';
 import ParticleCanvas from './ParticleCanvas';
 import ScrollToTop from './ScrollToTop';
@@ -176,6 +177,7 @@ const Landing = ({ isAuthenticated }) => {
       </section>
 
       <HowItWorks/>
+      <HostelsSection/>
       <Footer/>
       <ScrollToTop/>
     </>

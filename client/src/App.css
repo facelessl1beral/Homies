@@ -2159,3 +2159,107 @@ html, body {
     font-size: clamp(1.6rem, 8vw, 2rem);
   }
 }
+
+/* ============================================
+   HOSTELS SECTION — Landing Page
+   ============================================ */
+.hostels-section {
+  padding: 5rem 1.5rem;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+}
+.hostels-inner {
+  max-width: 960px;
+  margin: 0 auto;
+}
+.hostels-header {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+.hostels-eyebrow {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-purple);
+  margin-bottom: 0.75rem;
+}
+.hostels-heading {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.025em;
+}
+.hostels-sub {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  max-width: 540px;
+  margin: 0 auto;
+}
+.hostels-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.25rem;
+}
+.hostel-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+}
+.hostel-card:hover {
+  border-color: var(--accent-purple);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.hostel-card-icon {
+  font-size: 2rem;
+  margin-bottom: 0.75rem;
+}
+.hostel-card-name {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.35rem;
+}
+.hostel-card-location {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+.hostel-card-desc {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 0.75rem;
+  flex: 1;
+}
+.hostel-card-stats {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.25rem;
+}
+.hostel-stat {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+.hostel-stat strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.hostel-stat--available strong {
+  color: #10b981;
+}
+
+@media (max-width: 480px) {
+  .hostels-grid { grid-template-columns: 1fr; }
+  .hostels-section { padding: 3rem 1rem; }
+}

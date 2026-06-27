@@ -14,6 +14,15 @@ const transporter = nodemailer.createTransport({
 });
 
 // Register hostel
+// Public — get all hostels (no auth required)
+router.get('/public', async (req, res) => {
+  try {
+    const hostels = await Hostel.find({}, { name: 1, location: 1, description: 1, rooms: 1 });
+    const result = hostels.map(h => ({ _id: h._id, name: h.name, location: h.location, description: h.description, totalRooms: h.rooms.length, availableRooms: h.rooms.filter(r => r.status === 'available').length }));
+    res.json(result);
+  } catch (err) { res.status(500).send('Server error'); }
+});
+
 router.post('/register', [
   check('name', 'Hostel name required').not().isEmpty(),
   check('contactEmail', 'Valid email required').isEmail(),

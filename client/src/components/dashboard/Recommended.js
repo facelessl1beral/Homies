@@ -5,6 +5,29 @@ import { Link } from 'react-router-dom';
 import Spinner from '../layout/Spinner';
 import { getRecommendations, rejectUser, acceptUser } from '../../actions/profile';
 
+// Compute top matching fields between current user and a profile
+const getMatchInsights = (current, other) => {
+  if (!current || !other) return [];
+  const checks = [
+    { field: 'sleepSchedule', label: 'Sleep schedule', emoji: '🌙' },
+    { field: 'cleanliness',   label: 'Cleanliness',    emoji: '✨' },
+    { field: 'studyPref',     label: 'Study style',    emoji: '📚' },
+    { field: 'social',        label: 'Social vibe',    emoji: '🤝' },
+    { field: 'noise',         label: 'Noise level',    emoji: '🔊' },
+    { field: 'guests',        label: 'Guests policy',  emoji: '🚪' },
+    { field: 'exercise',      label: 'Exercise habits',emoji: '💪' },
+    { field: 'food',          label: 'Food preference',emoji: '🍽️' },
+    { field: 'smoke',         label: 'Smoking',        emoji: '🚭' },
+    { field: 'drink',         label: 'Drinking',       emoji: '🥤' },
+    { field: 'cook',          label: 'Cooking',        emoji: '🍳' },
+    { field: 'preferredHostel', label: 'Same hostel',  emoji: '🏠' },
+    { field: 'roomType',      label: 'Room type',      emoji: '🛏️' },
+  ];
+  const matched = checks.filter(c => current[c.field] && other[c.field] && current[c.field] === other[c.field]);
+  const mismatched = checks.filter(c => current[c.field] && other[c.field] && current[c.field] !== other[c.field]);
+  return { matched: matched.slice(0, 3), mismatched: mismatched.slice(0, 2) };
+};
+
 const MatchOverlay = ({ person, onClose }) => (
   <div className="match-overlay" onClick={onClose}>
     <h1>It's a Match!</h1>
@@ -30,7 +53,7 @@ const MatchOverlay = ({ person, onClose }) => (
   </div>
 );
 
-const SwipeCard = ({ profile, isTop, position, onSwipe }) => {
+const SwipeCard = ({ profile, isTop, position, onSwipe, currentUser }) => {
   const [dragStart, setDragStart] = useState(null);
   const [dragX, setDragX] = useState(0);
   const [swipeDir, setSwipeDir] = useState(null);
@@ -120,6 +143,38 @@ const SwipeCard = ({ profile, isTop, position, onSwipe }) => {
           {profile.food && <span className="swipe-tag">🍽 {profile.food}</span>}
           {profile.smoke === 'Non-smoker' && <span className="swipe-tag">🚭 Non-smoker</span>}
         </div>
+        {/* Match insight — why you matched */}
+        {currentUser && (() => {
+          const { matched, mismatched } = getMatchInsights(currentUser, profile);
+          if (matched.length === 0 && mismatched.length === 0) return null;
+          return (
+            <div style={{
+              marginTop: '0.75rem',
+              padding: '0.6rem 0.75rem',
+              background: 'rgba(124,58,237,0.08)',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid rgba(124,58,237,0.15)',
+              fontSize: '0.78rem',
+            }}>
+              {matched.length > 0 && (
+                <div style={{ marginBottom: mismatched.length > 0 ? '0.3rem' : 0 }}>
+                  <span style={{ color: '#10b981', fontWeight: 600 }}>✓ You both share: </span>
+                  <span style={{ color: 'var(--text-secondary)' }}>
+                    {matched.map(m => `${m.emoji} ${m.label}`).join(' · ')}
+                  </span>
+                </div>
+              )}
+              {mismatched.length > 0 && (
+                <div>
+                  <span style={{ color: '#f59e0b', fontWeight: 600 }}>≠ Different: </span>
+                  <span style={{ color: 'var(--text-muted)' }}>
+                    {mismatched.map(m => `${m.emoji} ${m.label}`).join(' · ')}
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {profile.notes && (
           <p style={{
             marginTop: '0.75rem', fontSize: '0.85rem',
@@ -140,6 +195,7 @@ const Recommended = ({
   rejectUser,
   acceptUser,
   profile: { recommendations, loading },
+  auth: { user: currentUser },
 }) => {
   const [cards, setCards] = useState([]);
   const [match, setMatch] = useState(null);
@@ -197,6 +253,7 @@ const Recommended = ({
                 isTop={i === 0}
                 position={i}
                 onSwipe={handleSwipe}
+                currentUser={currentUser}
               />
             ))}
           </div>
@@ -252,7 +309,8 @@ Recommended.propTypes = {
 };
 
 const mapStateToProps = state => ({
-  profile: state.profile
+  profile: state.profile,
+  auth: state.auth
 });
 
 export default connect(mapStateToProps, { getRecommendations, rejectUser, acceptUser })(Recommended);
