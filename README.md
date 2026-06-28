@@ -1,74 +1,102 @@
-# Roomies
+# Homies — Match. Move in. Thrive.
 
-Find Roommates Tinder Style!
-## Inspiration
+A two-sided web platform for hostel roommate matchmaking and room booking, built for students at Kyambogo University (KYU), Kampala, Uganda.
 
-Being foreign student to UTD,  'housing and roommates' was the biggest worry me and my parents had. It is not easy to find students with similar interests to settle down and find room with you. Although there were some WhatsApp groups and spreadsheets, it not really a  **Smart and Efficient Way** to find roommates. Here is our solution to the problem for current and future students, '**Roomies**'!
+## What It Does
 
-## What it does
+Students create detailed lifestyle profiles, discover compatible roommates through a Tinder-style swipe interface, mutually match, and are confirmed into shared hostel rooms by administrators through a managed booking confirmation flow.
 
-After you register using email, Roomies will ask you following questions about yourself:
-- Gender 👦👧
-- Age group 🔞
-- Country 🗺
-- University 🏫
-- Starting semester 📅
-- Course 💻
-- Food preferences 🍜🍟
-- Smoking habits 🚬
-- Drinking habits 🍷
-- Cooking experience 👩‍🍳
+## Key Features
 
-All options are framed such that information can reflect actual personality of a user.  Then we ask the user the what they expect in their roommate, again using series of question similar to above topics. Along with the usual option, we also provide option of 'Don't Care' which means roommate can has any option for that particular question.
+- Matching Engine V2 — 22 fields, 5 weighted categories (Lifestyle 40%, Habits 20%, Academic 15%, Demographic 10%, Hostel 15%)
+- Dealbreaker pre-filter — hard incompatibilities excluded before scoring
+- Match insight tooltips — each swipe card shows shared and different fields
+- Tinder-style swipe interface — accept, reject, mutual match detection
+- Hostel admin portal — room management and booking confirmation
+- Room management — batch add, view occupants, remove or switch students
+- Profile photo upload — direct device upload via Multer
+- Dark/light theme — CSS variable system, persists across sessions
+- PWA — installable on Android/iOS, offline capable via Service Worker
+- Mobile-first — fully responsive across 375px, 480px, 768px
+- Landing page — hero photo, typewriter, animated counters, live hostel listing
+- Cold start nudge — prompt when fewer than 3 lifestyle fields completed
 
-Then we used a matching method (Explained in detail in the below section), to get score for each pair of users using the collected information and rank them to suggest users the best options possible.
+## Tech Stack
 
-### The Roommate Matching Method
+- Frontend: React 16, Redux, React Router v5, Bootstrap 4
+- Backend: Node.js v22, Express.js, Helmet
+- Database: MongoDB 7 (dev) / MongoDB Atlas (production)
+- Auth: JWT — separate token flows for students and hostel admins
+- File upload: Multer
+- Email: Nodemailer SMTP
+- Payments: Flutterwave — MTN Mobile Money, Airtel Money (Phase 4)
+- PWA: Web App Manifest + Service Worker
 
-Say there are 3 users, let's consider only food as a question with 3 choices for simplicity - Veg, Non-Veg and Don't Care. The first value for each user denote what they is and second value denote what they expect from roommate.
+## Getting Started
 
-- **User 1**: Non-Veg, Don't Care 
-- **User 2**: Veg, Veg 
-- **User 3**: Non-Veg, Non-Veg
+### Prerequisites
+- Node.js v22
+- MongoDB 7
+- npm
 
-Now let's see the scores:
-- **User 1 and User 2 **- 50%. User 1's preference of 'Don't Care' is satisfied but User 2's 'Veg' not.
-- **User 2 and User 3 **- 0%. Neither users' preferences are satisfied.
-- **User 3 and User 1 ** - 100%. Both users' preferences are satisfied.
+### Installation
 
-We calculate this scores for each parameter, and take the average of them to decide the final score.
+    git clone https://github.com/facelessl1beral/Homies.git
+    cd Homies
+    npm install
+    cd client && npm install && cd ..
 
-## How we built it
+Create a .env file in the root:
 
-We used following tools and technologies to build the 'Roomies':
--  **JavaScript** - The easiest programming language ⁉
--  **CockroachDB** -  Scalable cloud database to store all the application data
--  **Node** - JavaScript runtime
--  **Express** - Backend node framework for developing APIs
--  **React** - Frontend framework for UI developement
--  **Redux** - State management tool
--  **JsonWebToken** - JSON-based web tokens for user authentication
--  **bcryptjs** - Hashing passwords before saving in database
--  **GitHub** - Version management
--  **VS Code** - Entire project development
--  **Heroku** - Project hosting and automatic deploys
+    MONGO_URI=mongodb://127.0.0.1:27017/kyu_hostel
+    JWT_SECRET=your_jwt_secret
+    NODE_ENV=development
+    PORT=5000
+    SMTP_HOST=smtp.gmail.com
+    SMTP_PORT=587
+    SMTP_USER=your_gmail@gmail.com
+    SMTP_PASS=your_gmail_app_password
+    FLUTTERWAVE_SECRET_KEY=your_flutterwave_secret
+    FLUTTERWAVE_PUBLIC_KEY=your_flutterwave_public
 
-## Challenges we ran into
+### Running Locally
 
-- CockroachDB was not easy to integrate with Express, Node and React stack!
-- Lack of motivation due to virtual setting!
+Terminal 1 — Backend:
 
-## Accomplishments that we're proud of
+    node server.js
 
- - Of course, able to complete a project, that too in a virtual setting! Means a lot!
-- Was able to implement about 95% things, I thought at start!
+Terminal 2 — Frontend:
 
-## What we learned
+    cd client && NODE_OPTIONS=--openssl-legacy-provider npm start
 
-- For my past few projects, I was working on MERN stack, so got to try CockroachDB. At start, it looked very different to integrate but after some trial and error, it was ready to go!
+- App: http://localhost:3000
+- API: http://localhost:5000
+- Admin: http://localhost:3000/admin
 
-## What's next for Roomies
+## Matching Algorithm
 
-- Add some questions to understand the user to understand his sleep and study patterns, introvert/ extrovert, etc.
-- A lot of scope to improve UI and designs!
-- Improve the user matching algorithm using machine learning after recording user responses.
+### Stage 1 — Dealbreaker Filter
+Hard incompatibilities excluded before scoring: smoker vs non-smoker, gender preference mismatch.
+
+### Stage 2 — Weighted Category Scoring
+
+| Category   | Weight | Fields |
+|------------|--------|--------|
+| Lifestyle  | 40%    | Sleep schedule, cleanliness, study preference, social, noise, guests, exercise |
+| Habits     | 20%    | Food, smoking, drinking, cooking |
+| Academic   | 15%    | University, course, semester |
+| Demographic| 10%    | Gender, age, country |
+| Hostel     | 15%    | Preferred hostel, room type, floor, bathroom, proximity |
+
+Formula: finalScore = (Lifestyle x 0.40) + (Habits x 0.20) + (Academic x 0.15) + (Demographic x 0.10) + (Hostel x 0.15)
+
+Result rounded to nearest integer. Verified by hand calculation against live data.
+
+## Academic Context
+
+Final year Information Systems project — Kyambogo University, June 2026.
+Deterministic weighted-sum model chosen over ML: no historical outcome data, explainability required for academic review, scale does not justify ML pipeline overhead.
+
+## License
+
+MIT

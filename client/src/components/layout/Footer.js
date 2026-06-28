@@ -54,7 +54,7 @@ const Footer = ({ isAuthenticated }) => {
           <h4 className='footer-col-title'>Project</h4>
           <ul>
             <li>
-              <a href='https://github.com/facelessl1beral/Roomies'
+              <a href='https://github.com/facelessl1beral/Homies'
                  target='_blank' rel='noopener noreferrer'>GitHub repo ↗</a>
             </li>
             <li>
