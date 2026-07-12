@@ -2,7 +2,7 @@ const express = require('express');
 const helmet = require('helmet');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ override: false }); // Render injects env vars directly
 
 const app = express();
 
