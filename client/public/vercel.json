@@ -7,10 +7,6 @@
     {
       "source": "/uploads/:path*",
       "destination": "https://homies-api-gsg3.onrender.com/uploads/:path*"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
     }
   ]
 }
