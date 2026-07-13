@@ -7,7 +7,7 @@ const HostelsSection = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    axios.get('/api/hostels/public')
+    axios.get(process.env.REACT_APP_API_URL ? process.env.REACT_APP_API_URL + '/api/hostels/public' : '/api/hostels/public')
       .then(res => { setHostels(res.data); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
