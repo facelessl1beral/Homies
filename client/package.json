@@ -40,7 +40,6 @@
       "last 1 safari version"
     ]
   },
-  "proxy": "https://homies-api-gsg3.onrender.com",
   "devDependencies": {
     "redux-mock-store": "^1.5.4"
   }

@@ -1,0 +1,10 @@
+# Cloudflare Pages / Netlify SPA fallback.
+#
+# React Router uses history mode, so a hard load of /dashboard or /admin asks
+# the static host for a file that does not exist. Without this rule the host
+# returns its own 404 and the app never boots — which looks identical to a
+# broken deployment.
+#
+# API calls are NOT proxied here. The client talks to the API directly via
+# REACT_APP_API_URL, and the server sets CORS headers to allow it.
+/*    /index.html   200

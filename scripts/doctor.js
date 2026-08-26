@@ -99,25 +99,40 @@ function checkEnv() {
 
 function checkApiTarget() {
   heading('Which backend will the frontend use?');
-  const clientPkgPath = path.join(__dirname, '..', 'client', 'package.json');
-  if (!fs.existsSync(clientPkgPath)) { warn('client/package.json not found'); return; }
+  const clientDir = path.join(__dirname, '..', 'client');
 
-  const proxy = JSON.parse(fs.readFileSync(clientPkgPath, 'utf8')).proxy;
-  if (!proxy) {
-    warn('No proxy set in client/package.json');
-    note('Relative /api calls from the dev server will 404 unless something else routes them.');
-    return;
+  const pkg = JSON.parse(fs.readFileSync(path.join(clientDir, 'package.json'), 'utf8'));
+  if (pkg.proxy) {
+    fail(`client/package.json still has a "proxy" entry: ${pkg.proxy}`);
+    note('The API base is now set by REACT_APP_API_URL. A leftover proxy will override it silently.');
   }
 
-  const isRemote = /^https?:\/\//.test(proxy) && !/localhost|127\.0\.0\.1/.test(proxy);
-  if (isRemote) {
-    warn(`Dev server proxies to a REMOTE backend: ${proxy}`);
-    note('Running `node server.js` locally has no effect — the browser never reaches it.');
-    note('You are testing your local frontend against the DEPLOYED backend and DEPLOYED database.');
-    note('To test fully locally, set "proxy": "http://localhost:5000" in client/package.json');
-    note('and restart the dev server (a proxy change needs a restart to take effect).');
+  const readEnvFile = file => {
+    const p = path.join(clientDir, file);
+    if (!fs.existsSync(p)) return null;
+    const line = fs.readFileSync(p, 'utf8')
+      .split('\n')
+      .map(l => l.trim())
+      .find(l => l.startsWith('REACT_APP_API_URL='));
+    return line ? line.split('=').slice(1).join('=').trim() : null;
+  };
+
+  const dev = readEnvFile('.env.development');
+  if (!dev) {
+    warn('client/.env.development does not set REACT_APP_API_URL');
+    note('`npm start` will use relative paths and API calls will 404.');
+  } else if (/localhost|127\.0\.0\.1/.test(dev)) {
+    ok(`Development calls go to ${dev}`);
   } else {
-    ok(`Dev server proxies to ${proxy}`);
+    warn(`Development calls go to a REMOTE backend: ${dev}`);
+    note('Local code changes to the API will appear to do nothing.');
+  }
+
+  const prod = readEnvFile('.env.production');
+  if (prod) ok(`Production build would call ${prod}`);
+  else {
+    note('No client/.env.production — production reads REACT_APP_API_URL from the hosting platform.');
+    note('Set it in Vercel / Cloudflare Pages / Render, or the deployed app will call its own origin.');
   }
 }
 

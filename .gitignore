@@ -4,3 +4,6 @@ config/default.json
 .idea/.env
 client/public/uploads/*
 .env
+
+# Patch files — delivery artefacts, never committed
+*.patch
