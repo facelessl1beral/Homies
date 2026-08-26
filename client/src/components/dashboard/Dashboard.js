@@ -4,6 +4,7 @@ import PropTypes from "prop-types";
 import { connect } from "react-redux";
 import { getCurrentProfile } from "../../actions/profile";
 import Spinner from "../layout/Spinner";
+import PaymentPanel from "./PaymentPanel";
 
 const Dashboard = ({
   getCurrentProfile,
@@ -125,14 +126,24 @@ const Dashboard = ({
           <div className="booking-strip">
             <h3>Hostel Booking</h3>
             {profile.bookingStatus === 'confirmed' ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '2rem' }}>🏠</span>
-                <div>
-                  <p className="booking-label" style={{ color: 'var(--accent-purple)' }}>Booking Confirmed</p>
-                  <p className="booking-sub">Room <strong>{profile.assignedRoom}</strong> at <strong>{profile.assignedHostel}</strong></p>
+              <Fragment>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '2rem' }}>🏠</span>
+                  <div>
+                    <p className="booking-label" style={{ color: 'var(--accent-purple)' }}>Booking Confirmed</p>
+                    <p className="booking-sub">Room <strong>{profile.assignedRoom}</strong> at <strong>{profile.assignedHostel}</strong></p>
+                  </div>
+                  <span className="booking-badge confirmed">Confirmed</span>
                 </div>
-                <span className="booking-badge confirmed">Confirmed</span>
-              </div>
+                {/* Payment step. Rendered only once a room is confirmed,
+                    because there is nothing to pay for before that. The panel
+                    is explicitly a prototype and takes no money — see
+                    PaymentPanel.js. */}
+                <PaymentPanel
+                  hostelName={profile.assignedHostel}
+                  roomNumber={profile.assignedRoom}
+                />
+              </Fragment>
             ) : profile.bookingStatus === 'pending' ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <span style={{ fontSize: '2rem' }}>⏳</span>

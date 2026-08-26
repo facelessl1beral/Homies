@@ -7,6 +7,7 @@ const Hostel = require('../../models/Hostel');
 const User = require('../../models/User');
 const nodemailer = require('nodemailer');
 const hostelAuth = require('../../middleware/hostelAuth');
+const { requireIds } = require('../../lib/validate');
 const {
   canConfirmBooking, canDeleteRoom, canSwitchOccupant, deriveRoomStatus,
 } = require('../../lib/booking');
@@ -224,7 +225,7 @@ router.get('/rooms', hostelAuth, async (req, res) => {
 });
 
 // Confirm a match — assign both students to a room
-router.post('/matches/confirm', hostelAuth, async (req, res) => {
+router.post('/matches/confirm', hostelAuth, requireIds('studentAId', 'studentBId', 'roomId'), async (req, res) => {
   try {
     const { studentAId, studentBId, roomId } = req.body;
     const hostel = req.hostel;
@@ -293,7 +294,7 @@ router.get('/rooms/:roomId/occupants', hostelAuth, async (req, res) => {
 });
 
 // Remove a student from a room
-router.post('/rooms/remove-occupant', hostelAuth, async (req, res) => {
+router.post('/rooms/remove-occupant', hostelAuth, requireIds('roomId', 'studentId'), async (req, res) => {
   try {
     const { roomId, studentId } = req.body;
     const hostel = req.hostel;
@@ -319,7 +320,7 @@ router.post('/rooms/remove-occupant', hostelAuth, async (req, res) => {
 });
 
 // Switch a student to a different room
-router.post('/rooms/switch-occupant', hostelAuth, async (req, res) => {
+router.post('/rooms/switch-occupant', hostelAuth, requireIds('studentId', 'fromRoomId', 'toRoomId'), async (req, res) => {
   try {
     const { studentId, fromRoomId, toRoomId } = req.body;
     const hostel = req.hostel;

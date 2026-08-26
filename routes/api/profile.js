@@ -5,6 +5,7 @@ const { check, validationResult } = require('express-validator');
 const User = require('../../models/User');
 const Hostel = require('../../models/Hostel');
 const { rankCandidates } = require('../../lib/matching');
+const { requireIds, asObjectId } = require('../../lib/validate');
 
 // @route   GET /api/profile
 // @desc    Get all profiles (dev only)
@@ -107,7 +108,7 @@ router.post('/', auth, async (req, res) => {
 // @route   POST /api/profile/reject
 // @desc    Reject a user
 // @access  Private
-router.post('/reject', auth, async (req, res) => {
+router.post('/reject', auth, requireIds('id'), async (req, res) => {
   try {
     const user = await User.findByIdAndUpdate(
       req.user.id,
@@ -128,10 +129,9 @@ router.post('/reject', auth, async (req, res) => {
 // @route   POST /api/profile/accept
 // @desc    Accept a user, and report whether that created a mutual match
 // @access  Private
-router.post('/accept', auth, async (req, res) => {
+router.post('/accept', auth, requireIds('id'), async (req, res) => {
   try {
     const targetId = req.body.id;
-    if (!targetId) return res.status(400).json({ msg: 'No user id supplied' });
 
     const user = await User.findByIdAndUpdate(
       req.user.id,
@@ -171,6 +171,11 @@ router.post('/accept', auth, async (req, res) => {
 // @access  Public
 router.get('/user/:user_id', async (req, res) => {
   try {
+    // A malformed id makes findById throw a CastError that the catch block
+    // reports as a 500. Checking the shape first returns an honest 400.
+    if (!asObjectId(req.params.user_id)) {
+      return res.status(400).json({ msg: 'Invalid profile id' });
+    }
     const user = await User.findById(req.params.user_id).select('-password');
     if (!user) return res.status(400).json({ msg: 'Profile not found' });
     res.json(user);

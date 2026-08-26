@@ -33,12 +33,6 @@ const MatchPreview = () => {
   const [animating, setAnimating] = useState(false);
   const [direction, setDirection] = useState(null); // 'left' | 'right'
 
-  // Auto-cycle every 3s
-  useEffect(() => {
-    const t = setTimeout(() => swipe('right'), 3000);
-    return () => clearTimeout(t);
-  }, [current]);
-
   const swipe = dir => {
     if (animating) return;
     setDirection(dir);
@@ -49,6 +43,17 @@ const MatchPreview = () => {
       setDirection(null);
     }, 420);
   };
+
+  // Auto-cycle. Declared after `swipe` and depending on it, so the effect
+  // always closes over the current function rather than the one from the
+  // render in which it was first created. Previously the effect sat above the
+  // definition with only [current] as its dependency list, which is a stale
+  // closure waiting to happen the moment `swipe` gains any state dependency.
+  useEffect(() => {
+    const t = setTimeout(() => swipe('right'), 3000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current]);
 
   const p = PROFILES[current];
   const next = PROFILES[(current + 1) % PROFILES.length];

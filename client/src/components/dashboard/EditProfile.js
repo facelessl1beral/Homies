@@ -245,6 +245,7 @@ const EditProfile = ({
         roomieCook: profile.roomieCook || '',
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, getCurrentProfile]);
 
   const goToStep = (newStep) => {

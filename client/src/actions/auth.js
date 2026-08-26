@@ -12,6 +12,55 @@ import {
 } from './types';
 import setAuthToken from '../utils/setAuthToken';
 
+
+/**
+ * Turn any axios failure into something the user can act on.
+ *
+ * Three distinct cases, which previously all produced the same result —
+ * nothing at all:
+ *
+ *   1. The server answered with validation errors  -> show each one
+ *   2. The server answered with a single message   -> show it
+ *   3. There was no response                       -> show a network message
+ *
+ * Case 3 is the one that mattered. `err.response` is undefined when the
+ * request never reached a server: connection refused, DNS failure, timeout,
+ * offline, or a CORS preflight rejection. The old code read
+ * `err.response.data.errors` unguarded, which threw a second TypeError from
+ * inside the catch block, so the FAIL action never dispatched and no alert
+ * appeared.
+ *
+ * The message names the API being called, because the most common cause of
+ * this in practice is REACT_APP_API_URL pointing somewhere the device cannot
+ * reach — a phone on the LAN cannot resolve `localhost:5000`, since on a
+ * phone `localhost` is the phone.
+ */
+const dispatchRequestError = (dispatch, err, fallback) => {
+  const errors = err.response && err.response.data && err.response.data.errors;
+  if (errors && errors.length) {
+    errors.forEach(error => dispatch(setAlert(error.msg, 'danger')));
+    return;
+  }
+
+  const msg = err.response && err.response.data && err.response.data.msg;
+  if (msg) {
+    dispatch(setAlert(msg, 'danger'));
+    return;
+  }
+
+  if (!err.response) {
+    const target = axios.defaults.baseURL || window.location.origin;
+    dispatch(setAlert(
+      `${fallback} — could not reach the server at ${target}. Check that it is running and reachable from this device.`,
+      'danger',
+      8000
+    ));
+    return;
+  }
+
+  dispatch(setAlert(`${fallback} (${err.response.status})`, 'danger'));
+};
+
 // Load User
 export const loadUser = () => async dispatch => {
   // Short-circuit when there is no token to check.
@@ -66,15 +115,8 @@ export const register = ({ firstName,lastName, email, password }) => async dispa
     });
     dispatch(loadUser());
   } catch (err) {
-    const errors = err.response.data.errors;
-
-    if (errors) {
-      errors.forEach(error => dispatch(setAlert(error.msg, 'danger')));
-    }
-
-    dispatch({
-      type: REGISTER_FAIL
-    });
+    dispatchRequestError(dispatch, err, 'Could not create your account');
+    dispatch({ type: REGISTER_FAIL });
   }
 };
 
@@ -99,15 +141,15 @@ export const login = (email, password) => async dispatch => {
 
     dispatch(loadUser());
   } catch (err) {
-    const errors = err.response.data.errors;
-
-    if (errors) {
-      errors.forEach(error => dispatch(setAlert(error.msg, 'danger')));
-    }
-
-    dispatch({
-      type: LOGIN_FAIL
-    });
+    // err.response is undefined when the request never reached a server at
+    // all — DNS failure, connection refused, timeout, offline. Reading
+    // err.response.data on that threw a TypeError *inside the catch block*,
+    // so LOGIN_FAIL was never dispatched and no alert was ever shown. The
+    // button simply did nothing, which is the worst possible failure: the
+    // user cannot tell a wrong password from an unreachable server, and has
+    // no reason to think anything happened at all.
+    dispatchRequestError(dispatch, err, 'Could not sign in');
+    dispatch({ type: LOGIN_FAIL });
   }
 };
 

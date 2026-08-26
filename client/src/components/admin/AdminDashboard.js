@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import axios from 'axios';
 
 const AdminDashboard = ({ token }) => {
@@ -16,7 +16,10 @@ const AdminDashboard = ({ token }) => {
   const [occupantDetails, setOccupantDetails] = useState({});
   const [selectedRoom, setSelectedRoom] = useState('');
 
-  const headers = { 'x-auth-token': token };
+  // Memoised so it is referentially stable across renders. As a plain object
+  // literal it was a new value every render, which is what made the
+  // exhaustive-deps warning on fetchAll correct rather than pedantic.
+  const headers = useMemo(() => ({ 'x-auth-token': token }), [token]);
 
   const inp = { background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', width: '100%' };
   const label = { fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' };
@@ -35,7 +38,7 @@ const AdminDashboard = ({ token }) => {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -296,7 +299,23 @@ const AdminDashboard = ({ token }) => {
                         } catch(e) {}
                       }
                     }}
-                    style={{ background: 'var(--bg-card)', border: `1px solid ${expandedRoom === room._id ? 'var(--accent-purple)' : 'var(--border)'}`, borderLeft: `4px solid ${statusColor(room.status)}`, borderRadius: 'var(--radius-md)', padding: '1rem', cursor: 'pointer', transition: 'border-color 0.2s' }}>
+                    style={{
+                      background: 'var(--bg-card)',
+                      // Longhand on all four sides rather than `border` plus a
+                      // `borderLeft` override. React warns about mixing the two
+                      // because it diffs style properties individually: on a
+                      // re-render it may apply the shorthand after the longhand,
+                      // silently wiping the status colour stripe. The bug only
+                      // shows on re-render, so it is easy to miss in testing.
+                      borderTop: `1px solid ${expandedRoom === room._id ? 'var(--accent-purple)' : 'var(--border)'}`,
+                      borderRight: `1px solid ${expandedRoom === room._id ? 'var(--accent-purple)' : 'var(--border)'}`,
+                      borderBottom: `1px solid ${expandedRoom === room._id ? 'var(--accent-purple)' : 'var(--border)'}`,
+                      borderLeft: `4px solid ${statusColor(room.status)}`,
+                      borderRadius: 'var(--radius-md)',
+                      padding: '1rem',
+                      cursor: 'pointer',
+                      transition: 'border-color 0.2s'
+                    }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <h5 style={{ margin: 0, color: 'var(--text-primary)' }}>Room {room.roomNumber}</h5>
                       <button onClick={e => { e.stopPropagation(); handleDelete(room._id, room); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem' }}>✕</button>

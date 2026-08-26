@@ -24,18 +24,19 @@ Students create detailed lifestyle profiles, discover compatible roommates throu
 ## Tech Stack
 
 - Frontend: React 16, Redux, React Router v5, Bootstrap 4
-- Backend: Node.js v22, Express.js, Helmet
+- Backend: Node.js 18+, Express.js, Helmet, CORS
 - Database: MongoDB 7 (dev) / MongoDB Atlas (production)
+- Testing: Mocha 10 + Node assert — 59 unit tests, no database required
 - Auth: JWT — separate token flows for students and hostel admins
 - File upload: Multer
 - Email: Nodemailer SMTP
-- Payments: Flutterwave — MTN Mobile Money, Airtel Money (Phase 4)
+- Payments: mobile money UI prototype — MTN, Airtel (no gateway integration)
 - PWA: Web App Manifest + Service Worker
 
 ## Getting Started
 
 ### Prerequisites
-- Node.js v22
+- Node.js 18 or newer (deployment pins 18.20.0 via `.node-version`)
 - MongoDB 7
 - npm
 
@@ -59,6 +60,9 @@ Create a .env file in the root:
     FLUTTERWAVE_SECRET_KEY=your_flutterwave_secret
     FLUTTERWAVE_PUBLIC_KEY=your_flutterwave_public
 
+Copy `.env.example` to `.env` and fill it in. `client/.env.development`
+already points the frontend at `http://localhost:5000` and needs no changes.
+
 ### Running Locally
 
 Terminal 1 — Backend:
@@ -67,11 +71,23 @@ Terminal 1 — Backend:
 
 Terminal 2 — Frontend:
 
-    cd client && NODE_OPTIONS=--openssl-legacy-provider npm start
+    cd client && npm start
 
 - App: http://localhost:3000
 - API: http://localhost:5000
 - Admin: http://localhost:3000/admin
+- Health: http://localhost:5000/api/health
+
+### Verifying
+
+    npm test                        # 59 unit tests
+    npm run doctor                  # environment + data diagnostic
+    npm run build --prefix client   # production build
+
+`npm run doctor` is the fastest way to find out whether anything is wrong. It
+reports which backend the frontend will reach, what is in the database, and —
+per student — how many cards their Discover feed will contain. See
+[docs/TESTING.md](docs/TESTING.md).
 
 ## Matching Algorithm
 
@@ -91,6 +107,27 @@ Hard incompatibilities excluded before scoring: smoker vs non-smoker, gender pre
 Formula: finalScore = (Lifestyle x 0.40) + (Habits x 0.20) + (Academic x 0.15) + (Demographic x 0.10) + (Hostel x 0.15)
 
 Result rounded to nearest integer. Verified by hand calculation against live data.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/STATUS.md](docs/STATUS.md) | What works, what does not, known limitations |
+| [docs/TESTING.md](docs/TESTING.md) | Test framework, tiers, manual checklist, the doctor |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Environment variables, Render, Cloudflare Pages, Vercel |
+| [docs/PAYMENTS.md](docs/PAYMENTS.md) | Mobile money prototype and what integration needs |
+
+## Known Constraints
+
+- **Render's free tier sleeps** after ~15 minutes idle and takes 30–60 seconds
+  to wake. Hit `/api/health` before a demonstration to warm it. This is a
+  hosting tier characteristic, not a defect.
+- **Uploaded photos do not survive a restart** on Render's ephemeral
+  filesystem. Persisting them needs a mounted disk or object storage.
+- **`mongoose` 5.x is end-of-life** and carries advisories that cannot be
+  resolved without a four major-version upgrade. Input guards in
+  `lib/validate.js` close the reachable paths; see docs/STATUS.md §3.
+- **Payments are user interface only.** Nothing is charged. See docs/PAYMENTS.md.
 
 ## Academic Context
 
