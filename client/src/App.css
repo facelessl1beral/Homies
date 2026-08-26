@@ -2275,3 +2275,76 @@ html, body {
 @media (max-width: 768px) {
   .rooms-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 }
+
+/* ── Swipe card: reciprocal-like hint ─────────────────────────────────────
+   Shown when the candidate has already swiped right on the viewer. This is
+   the only place the feed reveals anything about another user's swipe
+   history, and it is deliberately one-directional: it tells you that a match
+   is available to you, without telling you who else they have liked. */
+.swipe-likes-you {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent-purple);
+  background: rgba(124, 58, 237, 0.10);
+  border: 1px solid rgba(124, 58, 237, 0.22);
+  border-radius: var(--radius-full);
+  padding: 3px 10px;
+  display: inline-block;
+}
+
+/* ── Password field with show/hide toggle ─────────────────────────────────
+   The toggle sits inside the input's padding rather than beside it, so the
+   field keeps the same footprint as every other input on the form and the
+   layout does not shift when it is added. */
+.pw-field {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+.pw-field-input {
+  width: 100%;
+  padding-right: 4.25rem !important;
+}
+.pw-field-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 10px;
+  cursor: pointer;
+  line-height: 1.4;
+  transition: color 0.15s, border-color 0.15s;
+}
+.pw-field-toggle:hover,
+.pw-field-toggle:focus-visible {
+  color: var(--accent-purple);
+  border-color: var(--accent-purple);
+}
+/* Visible focus ring: the toggle is keyboard reachable, so it must be
+   keyboard visible. */
+.pw-field-toggle:focus-visible {
+  outline: 2px solid var(--accent-purple);
+  outline-offset: 2px;
+}
+/* Suppress the browser's own reveal control so there are not two of them
+   sitting on top of each other in Edge and Safari. */
+.pw-field-input::-ms-reveal,
+.pw-field-input::-ms-clear { display: none; }
+
+/* ── Inline form hints ───────────────────────────────────────────────────── */
+.form-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+.form-hint--ok   { color: var(--success, #10b981); }
+.form-hint--warn { color: var(--warning, #f59e0b); }

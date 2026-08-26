@@ -4,15 +4,16 @@ import { Link } from 'react-router-dom';
 import { setAlert } from '../../actions/alert';
 import { register, logout } from '../../actions/auth';
 import PropTypes from 'prop-types';
+import PasswordField from '../layout/PasswordField';
 
 const Register = ({ setAlert, register, logout, isAuthenticated }) => {
   const [formData, setFormData] = useState({
     firstName: '', lastName: '', email: '', password: '', password2: ''
   });
-  const [showPassword, setShowPassword] = useState(false);
-  const [showPassword2, setShowPassword2] = useState(false);
-
   const { firstName, lastName, email, password, password2 } = formData;
+  const passwordsMatch = password.length > 0 && password === password2;
+  const canSubmit =
+    firstName.trim() && lastName.trim() && email.trim() && password.length >= 6 && passwordsMatch;
   const onChange = e => setFormData({ ...formData, [e.target.name]: e.target.value });
 
   const onSubmit = async e => {
@@ -88,37 +89,45 @@ const Register = ({ setAlert, register, logout, isAuthenticated }) => {
             required
           />
         </div>
-        <div className='form-group' style={{ position: 'relative' }}>
-          <input
-            type={showPassword ? 'text' : 'password'}
-            placeholder='Password'
-            name='password'
+        <div className='form-group'>
+          <PasswordField
             value={password}
             onChange={onChange}
-            minLength='6'
+            autoComplete='new-password'
             required
           />
-          <span
-            onClick={() => setShowPassword(!showPassword)}
-            style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', opacity: 0.5, fontSize: '0.85rem', userSelect: 'none' }}
-          >{showPassword ? 'Hide' : 'Show'}</span>
+          {password.length > 0 && password.length < 6 && (
+            <small className='form-hint form-hint--warn'>
+              {6 - password.length} more character{6 - password.length === 1 ? '' : 's'} needed
+            </small>
+          )}
         </div>
-        <div className='form-group' style={{ position: 'relative' }}>
-          <input
-            type={showPassword2 ? 'text' : 'password'}
-            placeholder='Confirm Password'
+        <div className='form-group'>
+          <PasswordField
             name='password2'
+            placeholder='Confirm Password'
             value={password2}
             onChange={onChange}
-            minLength='6'
+            autoComplete='new-password'
             required
           />
-          <span
-            onClick={() => setShowPassword2(!showPassword2)}
-            style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', opacity: 0.5, fontSize: '0.85rem', userSelect: 'none' }}
-          >{showPassword2 ? 'Hide' : 'Show'}</span>
+          {/* Live confirmation feedback. Previously a mismatch was only
+              discovered on submit, as a red toast, after the form had already
+              been filled in — the most common registration failure, reported
+              at the least useful moment. */}
+          {password2.length > 0 && (
+            <small className={`form-hint ${passwordsMatch ? 'form-hint--ok' : 'form-hint--warn'}`}>
+              {passwordsMatch ? 'Passwords match' : 'Passwords do not match'}
+            </small>
+          )}
         </div>
-        <input type='submit' className='btn btn-primary' value='Register' />
+        <input
+          type='submit'
+          className='btn btn-primary'
+          value='Register'
+          disabled={!canSubmit}
+          style={canSubmit ? {} : { opacity: 0.5, cursor: 'not-allowed' }}
+        />
       </form>
       <p className='my-1'>
         Already have an account? <Link to='/login'>Sign In</Link>

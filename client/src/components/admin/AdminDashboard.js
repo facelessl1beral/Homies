@@ -9,10 +9,10 @@ const AdminDashboard = ({ token }) => {
   const [error, setError] = useState('');
   const [roomForm, setRoomForm] = useState({ roomNumber: '', type: '', floor: '', bathroom: '', proximity: '', capacity: 2 });
   const [formError, setFormError] = useState('');
+  const [notice, setNotice] = useState('');
   const [batchCount, setBatchCount] = useState(1);
   const [confirming, setConfirming] = useState(null);
   const [expandedRoom, setExpandedRoom] = useState(null);
-  const [occupantNames, setOccupantNames] = useState({});
   const [occupantDetails, setOccupantDetails] = useState({});
   const [selectedRoom, setSelectedRoom] = useState('');
 
@@ -55,7 +55,7 @@ const AdminDashboard = ({ token }) => {
       setRoomForm({ roomNumber: '', type: '', floor: '', bathroom: '', proximity: '', capacity: 2 });
       setBatchCount(1);
       setFormError('');
-    } catch (err) { setFormError('Failed to add room'); }
+    } catch (err) { setFormError(err.response?.data?.msg || 'Failed to add room'); }
   };
 
   const handleRemoveOccupant = async (roomId, studentId, studentName) => {
@@ -79,7 +79,7 @@ const AdminDashboard = ({ token }) => {
   };
 
   const handleSwitchOccupant = async (studentId, studentName, fromRoomId) => {
-    const availableRooms = rooms.filter(r => r._id !== fromRoomId && r.status === 'available');
+    const availableRooms = rooms.filter(r => r._id !== fromRoomId && (r.occupants || []).length < r.capacity);
     if (availableRooms.length === 0) { setError('No available rooms to switch to'); return; }
     const options = availableRooms.map((r, i) => `${i + 1}. Room ${r.roomNumber} (${r.type})`).join('\n');
     const choice = window.prompt(`Switch ${studentName} to which room?\n\n${options}\n\nEnter room number:`);
@@ -87,33 +87,62 @@ const AdminDashboard = ({ token }) => {
     const targetRoom = availableRooms.find(r => r.roomNumber === choice.trim());
     if (!targetRoom) { setError('Room not found — enter the exact room number'); return; }
     try {
-      await axios.post('/api/hostels/rooms/switch-occupant', { studentId, fromRoomId, toRoomId: targetRoom._id }, { headers });
-      alert(`${studentName} moved to Room ${targetRoom.roomNumber}`);
-      const res = await axios.get('/api/hostels/rooms', { headers });
-      setRooms(res.data);
+      const res = await axios.post('/api/hostels/rooms/switch-occupant', { studentId, fromRoomId, toRoomId: targetRoom._id }, { headers });
+      setRooms(res.data.rooms);
+      setNotice(`${studentName} moved to Room ${targetRoom.roomNumber}`);
+      setError('');
     } catch (err) {
       setError(err.response?.data?.msg || 'Failed to switch room');
     }
   };
 
-  const handleDelete = async (roomId) => {
+  const handleDelete = async (roomId, room) => {
+    // The server refuses to delete an occupied room, but asking first means an
+    // administrator does not have to discover that by triggering an error.
+    const occupied = room && room.occupants && room.occupants.length > 0;
+    const question = occupied
+      ? `Room ${room.roomNumber} has ${room.occupants.length} occupant(s). Remove them before deleting.`
+      : `Delete Room ${room ? room.roomNumber : ''}? This cannot be undone.`;
+    if (occupied) { setError(question); return; }
+    if (!window.confirm(question)) return;
     try {
       const res = await axios.delete(`/api/hostels/rooms/${roomId}`, { headers });
       setRooms(res.data);
-    } catch (err) { setError('Failed to delete room'); }
+      setError('');
+    } catch (err) {
+      setError(err.response?.data?.msg || 'Failed to delete room');
+    }
   };
 
   const handleConfirm = async (studentAId, studentBId) => {
     if (!selectedRoom) return alert('Please select a room first');
     try {
-      await axios.post('/api/hostels/matches/confirm', { studentAId, studentBId, roomId: selectedRoom }, { headers });
+      const res = await axios.post('/api/hostels/matches/confirm', { studentAId, studentBId, roomId: selectedRoom }, { headers });
       setConfirming(null); setSelectedRoom('');
+      setError('');
+      // Say plainly when the booking saved but the notification did not. The
+      // one thing this must never do is let an admin believe both students
+      // have been told when no email left the building.
+      if (res.data && res.data.emailed === false) {
+        setNotice(`Booking confirmed for Room ${res.data.room}, but the confirmation email could not be sent. Tell the students directly.`);
+      } else {
+        setNotice(`Booking confirmed for Room ${res.data.room}. Both students have been emailed.`);
+      }
       fetchAll();
     } catch (err) { setError(err.response?.data?.msg || 'Failed to confirm booking'); }
   };
 
-  const availableRooms = rooms.filter(r => r.status === 'available');
-  const statusColor = s => s === 'available' ? 'var(--success)' : s === 'pending' ? 'var(--warning)' : 'var(--danger)';
+  const availableRooms = rooms.filter(r => (r.occupants || []).length + 2 <= r.capacity);
+  // Room status is now derived from occupancy on the server
+  // (available | partial | full). 'pending' is retained so rooms written by
+  // the previous version still render with a sensible colour rather than
+  // falling through to the red "unknown" branch.
+  const statusColor = s => {
+    if (s === 'available') return 'var(--success)';
+    if (s === 'partial' || s === 'pending') return 'var(--warning)';
+    if (s === 'full') return 'var(--danger)';
+    return 'var(--text-muted)';
+  };
 
   const pill = (val, field, display) => (
     <button key={val} onClick={() => setRoomForm(f => ({ ...f, [field]: val }))}
@@ -130,6 +159,7 @@ const AdminDashboard = ({ token }) => {
     <div style={{ maxWidth: '900px', margin: '0 auto', padding: '1rem' }}>
       <h2 style={{ color: 'var(--text-primary)', marginBottom: '0.25rem' }}>Hostel Dashboard</h2>
       {error && <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: 'var(--danger)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', margin: '1rem 0' }}>{error}</div>}
+      {notice && <div style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', margin: '1rem 0' }}>{notice}</div>}
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '12px', margin: '20px 0', borderBottom: '2px solid var(--border)' }}>
@@ -269,7 +299,7 @@ const AdminDashboard = ({ token }) => {
                     style={{ background: 'var(--bg-card)', border: `1px solid ${expandedRoom === room._id ? 'var(--accent-purple)' : 'var(--border)'}`, borderLeft: `4px solid ${statusColor(room.status)}`, borderRadius: 'var(--radius-md)', padding: '1rem', cursor: 'pointer', transition: 'border-color 0.2s' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <h5 style={{ margin: 0, color: 'var(--text-primary)' }}>Room {room.roomNumber}</h5>
-                      <button onClick={e => { e.stopPropagation(); handleDelete(room._id); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
+                      <button onClick={e => { e.stopPropagation(); handleDelete(room._id, room); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
                     </div>
                     <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '8px 0 4px' }}>{room.type} · {room.floor}</p>
                     <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '0 0 8px' }}>{room.bathroom} · Cap: {room.capacity}</p>

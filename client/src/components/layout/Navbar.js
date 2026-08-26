@@ -49,12 +49,17 @@ const Navbar = ({ auth: { isAuthenticated, loading }, logout }) => {
         <HomiesLogo size={28} showText={true} />
       </Link>
 
-      {/* Right cluster */}
-      {!loading && (
-        <div className='hm-nav-right'>
+      {/* Right cluster.
+          Never gated on `loading` as a whole. The theme toggle and the menu
+          button are chrome: they work identically whether or not we know who
+          the visitor is, and hiding them while an auth request was in flight
+          was the cause of the "navbar buttons vanish when I open a URL
+          directly" bug. Only the pieces whose content genuinely depends on
+          identity wait for `loading` to settle. */}
+      <div className='hm-nav-right'>
 
           {/* Authenticated nav links (hidden on mobile — in dropdown instead) */}
-          {isAuthenticated && !isHostelAdmin && (
+          {!loading && isAuthenticated && !isHostelAdmin && (
             <div className='hm-nav-links hide-sm'>
               <Link to='/recommendations' className='hm-nav-link'>Discover</Link>
               <Link to='/profiles'        className='hm-nav-link'>People</Link>
@@ -72,8 +77,13 @@ const Navbar = ({ auth: { isAuthenticated, loading }, logout }) => {
             {theme === 'dark' ? '☀' : '🌙'}
           </button>
 
-          {/* ── GUEST ── */}
-          {!isAuthenticated && !isHostelAdmin && (
+          {/* ── GUEST ──
+              Shown while auth is still loading too. A visitor who is in fact
+              logged in sees this for a few hundred milliseconds before it
+              swaps — which is a far better failure than an empty navbar, and
+              is now rare anyway since logged-out visitors no longer wait on a
+              network call at all. */}
+          {(loading || !isAuthenticated) && !isHostelAdmin && (
             <div className='hm-nav-auth-group' ref={menuRef}>
               {/* Sign up pill — always visible */}
               <Link
@@ -109,7 +119,7 @@ const Navbar = ({ auth: { isAuthenticated, loading }, logout }) => {
           )}
 
           {/* ── AUTHENTICATED STUDENT ── */}
-          {isAuthenticated && !isHostelAdmin && (
+          {!loading && isAuthenticated && !isHostelAdmin && (
             <div className='hm-nav-auth-group' ref={menuRef}>
               <button
                 className={`hm-nav-menu-btn${menuOpen ? ' hm-nav-menu-btn--open' : ''}`}
@@ -151,8 +161,7 @@ const Navbar = ({ auth: { isAuthenticated, loading }, logout }) => {
             </div>
           )}
 
-        </div>
-      )}
+      </div>
     </nav>
   );
 };

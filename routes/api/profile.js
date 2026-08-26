@@ -4,7 +4,7 @@ const auth = require('../../middleware/auth');
 const { check, validationResult } = require('express-validator');
 const User = require('../../models/User');
 const Hostel = require('../../models/Hostel');
-const nodemailer = require('nodemailer');
+const { rankCandidates } = require('../../lib/matching');
 
 // @route   GET /api/profile
 // @desc    Get all profiles (dev only)
@@ -34,7 +34,7 @@ router.get('/me', auth, async (req, res) => {
 });
 
 // @route   GET /api/profile/recommended
-// @desc    Get recommended roommates sorted by match score
+// @desc    Get recommended roommates, dealbreaker-filtered and score-ranked
 // @access  Private
 router.get('/recommended', auth, async (req, res) => {
   try {
@@ -43,78 +43,28 @@ router.get('/recommended', auth, async (req, res) => {
       return res.status(400).json({ msg: 'There is no profile for this user' });
     }
 
-    let otherUsers = await User.find({ 
-      _id: { $ne: req.user.id } 
-    }).select('-password');
+    const otherUsers = await User.find({ _id: { $ne: req.user.id } }).select('-password');
 
-    // Matching Engine V2 — weighted category scoring
-    // Categories: Lifestyle 40%, Habits 20%, Academic 15%, Demographic 10%, Hostel 15%
-    const categoryScore = (current, other, fields) => {
-      if (fields.length === 0) return 0;
-      let matched = 0;
-      let total = 0;
-      fields.forEach(field => {
-        const a = current[field];
-        const b = other[field];
-        if (a || b) {
-          total++;
-          if (a && b && a === b) matched++;
-        }
-      });
-      return total === 0 ? 0 : (matched / total) * 100;
-    };
+    // The engine itself lives in lib/matching.js so that it can be unit tested
+    // without a database. See tests/matching.test.js.
+    const ranked = rankCandidates(currentUser, otherUsers.map(u => u.toObject()));
 
-    const score = (current, other) => {
-      const lifestyleFields   = ['sleepSchedule', 'cleanliness', 'studyPref', 'social', 'noise', 'guests', 'exercise'];
-      const habitsFields      = ['food', 'smoke', 'drink', 'cook'];
-      const academicFields    = ['univ', 'course', 'sem'];
-      const demographicFields = ['gender', 'age', 'country'];
-      const hostelFields      = ['preferredHostel', 'roomType', 'floorPref', 'bathroomPref', 'proximityPref'];
-
-      const lifestyleScore   = categoryScore(current, other, lifestyleFields);
-      const habitsScore      = categoryScore(current, other, habitsFields);
-      const academicScore    = categoryScore(current, other, academicFields);
-      const demographicScore = categoryScore(current, other, demographicFields);
-      const hostelScore      = categoryScore(current, other, hostelFields);
-
-      const finalScore =
-        (lifestyleScore   * 0.40) +
-        (habitsScore      * 0.20) +
-        (academicScore    * 0.15) +
-        (demographicScore * 0.10) +
-        (hostelScore       * 0.15);
-
-      return Math.round(finalScore);
-    };
-
-    // Dealbreaker pre-filter — hard incompatibilities excluded before scoring
-    const passesDealbreakers = (current, other) => {
-      // Smoking dealbreaker — non-smoker who cares vs smoker
-      if (current.smoke === 'Non-smoker' && other.smoke === 'Smoker') return false;
-      if (other.smoke === 'Non-smoker' && current.smoke === 'Smoker') return false;
-      // Gender preference dealbreaker
-      if (current.roomieGender && current.roomieGender !== 'No preference' && current.roomieGender !== other.gender) return false;
-      if (other.roomieGender && other.roomieGender !== 'No preference' && other.roomieGender !== current.gender) return false;
-      return true;
-    };
-
-    const filteredUsers = otherUsers.filter(other => passesDealbreakers(currentUser, other));
-
-    const result = filteredUsers.map(other => {
-      const obj = other.toObject();
-      obj.score = score(currentUser, other);
-      if (currentUser.rejected?.includes(other._id.toString())) {
-        obj.status = 'Rejected';
-      } else if (currentUser.accepted?.includes(other._id.toString())) {
-        obj.status = 'Accepted';
-      } else {
-        obj.status = '-';
-      }
-      return obj;
+    // Strip fields a swipe card has no business carrying to the browser.
+    // `accepted`/`rejected` are other people's swipe history and `email` is
+    // contact information that should only be revealed once a booking is
+    // confirmed. `likesYou` is computed here instead so the client can tell a
+    // real mutual match from a one-sided like without being handed the raw
+    // lists to work it out from.
+    const myId = String(currentUser._id);
+    const payload = ranked.map(candidate => {
+      const { accepted, rejected, email, ...safe } = candidate;
+      return {
+        ...safe,
+        likesYou: Array.isArray(accepted) && accepted.map(String).includes(myId),
+      };
     });
 
-    result.sort((a, b) => b.score - a.score);
-    res.status(200).json(result);
+    res.status(200).json(payload);
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server error');
@@ -176,20 +126,40 @@ router.post('/reject', auth, async (req, res) => {
 });
 
 // @route   POST /api/profile/accept
-// @desc    Accept a user
+// @desc    Accept a user, and report whether that created a mutual match
 // @access  Private
 router.post('/accept', auth, async (req, res) => {
   try {
+    const targetId = req.body.id;
+    if (!targetId) return res.status(400).json({ msg: 'No user id supplied' });
+
     const user = await User.findByIdAndUpdate(
       req.user.id,
       {
-        $addToSet: { accepted: req.body.id },
-        $pull:     { rejected: req.body.id }
+        $addToSet: { accepted: targetId },
+        $pull:     { rejected: targetId }
       },
       { new: true }
     ).select('-password');
 
-    res.status(200).json(user);
+    // Reciprocity is decided here, on the server, and returned as a plain
+    // boolean. Previously the client showed its "It's a Match!" overlay on
+    // every right-swipe with no check at all, so a one-sided like was
+    // presented to the user as a confirmed mutual match. Deciding it here
+    // rather than shipping the other person's `accepted` array to the browser
+    // keeps other users' swipe history private.
+    const target = await User.findById(targetId).select('firstName lastName name avatar accepted');
+    const mutual = !!target
+      && Array.isArray(target.accepted)
+      && target.accepted.map(String).includes(String(req.user.id));
+
+    res.status(200).json({
+      profile: user,
+      mutual,
+      matchedWith: mutual
+        ? { _id: target._id, firstName: target.firstName, lastName: target.lastName, name: target.name, avatar: target.avatar }
+        : null
+    });
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server error');

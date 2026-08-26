@@ -1,0 +1,168 @@
+From 6b894228bddd93c735350bac53cdf6cd1d235278 Mon Sep 17 00:00:00 2001
+From: Homies Dev <dev@homies.local>
+Date: Wed, 26 Aug 2026 06:29:43 +0000
+Subject: [PATCH 3/4] fix: navbar controls no longer vanish on direct URL
+ navigation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Reported symptom: opening a URL directly, or refreshing, leaves the
+navbar with a logo and nothing else — no theme toggle, no Sign up, no
+hamburger. Navigating between pages with in-app links looks fine.
+
+Two causes, both in the same path.
+
+First, Navbar wrapped its entire right-hand cluster in `{!loading && ...}`.
+The auth reducer starts at loading:true, so until auth settles the whole
+cluster is unmounted — including the theme toggle and the menu button,
+which are chrome and do not depend on identity at all.
+
+Second, loadUser() fired a request to /api/auth unconditionally, even for
+visitors with no token, who obviously cannot be authenticated by it. On a
+hard navigation the store resets to loading:true and the app waits for
+that round trip; in-app link navigation does not reset the store, which
+is precisely why the bug only appeared when using a URL.
+
+The two combine badly against a free-tier backend. Render spins an idle
+free instance down and takes 30-60 seconds to cold start, so the first
+visitor of the day got a navbar with no controls for up to a minute, and
+would reasonably conclude the site was broken.
+
+Fixes:
+
+- loadUser returns AUTH_ERROR immediately when there is no stored token.
+  A logged-out visitor needs no network call to establish that they are
+  logged out. This also removes one pointless request from every
+  cold load.
+
+- The right cluster always renders. Only the parts whose content depends
+  on identity wait for `loading`. The guest group shows during loading
+  too, so a returning user briefly sees "Sign up" before it swaps — a far
+  better failure than an empty navbar, and now rare, since the only
+  people who still wait are those who do have a token.
+
+Also fixed here because it is the same file: logout() did not call
+setAuthToken(null), so the stale x-auth-token stayed on axios defaults
+for the remaining life of the page. Logging out and back in as a
+different user in the same tab could send whichever identity happened to
+set the header last.
+
+Rejected: rendering a skeleton navbar during loading. It would still have
+meant the theme toggle was unavailable for the duration, and the toggle
+has no reason to be unavailable. The right fix was to stop gating chrome
+on identity, not to make the gate prettier.
+
+Does not fix: the cold-start delay itself. Anything that genuinely needs
+the API — the dashboard, the feed — still waits on it. That is a hosting
+characteristic, not a code defect, but it should be mentioned in the
+README so it is not mistaken for one.
+---
+ client/src/actions/auth.js             | 23 ++++++++++++++++++++--
+ client/src/components/layout/Navbar.js | 27 +++++++++++++++++---------
+ 2 files changed, 39 insertions(+), 11 deletions(-)
+
+diff --git a/client/src/actions/auth.js b/client/src/actions/auth.js
+index 13bde83..8ad90b2 100644
+--- a/client/src/actions/auth.js
++++ b/client/src/actions/auth.js
+@@ -14,10 +14,24 @@ import setAuthToken from '../utils/setAuthToken';
+ 
+ // Load User
+ export const loadUser = () => async dispatch => {
+-  if (localStorage.token) {
+-    setAuthToken(localStorage.token);
++  // Short-circuit when there is no token to check.
++  //
++  // This used to fire a request to /api/auth unconditionally, including for
++  // logged-out visitors who obviously could not be authenticated by it. The
++  // auth reducer starts at loading:true and only leaves that state when the
++  // request settles, and the Navbar hid its entire right-hand cluster while
++  // loading — so on any hard page load the theme toggle, the Sign up button
++  // and the hamburger were all missing until the round trip finished. Against
++  // a free-tier host that has spun down, that round trip is 30-60 seconds.
++  //
++  // A visitor with no token needs no network call to establish that they are
++  // not logged in, so we settle the state immediately.
++  if (!localStorage.token) {
++    return dispatch({ type: AUTH_ERROR });
+   }
+ 
++  setAuthToken(localStorage.token);
++
+   try {
+     const res = await axios.get('/api/auth');
+ 
+@@ -99,6 +113,11 @@ export const login = (email, password) => async dispatch => {
+ 
+ // Logout / Clear Profile
+ export const logout = () => dispatch => {
++  // Clear the axios default header as well as the stored token. Without this
++  // the stale x-auth-token stayed attached to every subsequent request for the
++  // rest of the page's life, so the next login in the same tab could send two
++  // different identities depending on which code path set the header last.
++  setAuthToken(null);
+   dispatch({ type: CLEAR_PROFILE });
+   dispatch({ type: LOGOUT });
+ };
+diff --git a/client/src/components/layout/Navbar.js b/client/src/components/layout/Navbar.js
+index 5a8f2a4..6c7ba89 100644
+--- a/client/src/components/layout/Navbar.js
++++ b/client/src/components/layout/Navbar.js
+@@ -49,12 +49,17 @@ const Navbar = ({ auth: { isAuthenticated, loading }, logout }) => {
+         <HomiesLogo size={28} showText={true} />
+       </Link>
+ 
+-      {/* Right cluster */}
+-      {!loading && (
+-        <div className='hm-nav-right'>
++      {/* Right cluster.
++          Never gated on `loading` as a whole. The theme toggle and the menu
++          button are chrome: they work identically whether or not we know who
++          the visitor is, and hiding them while an auth request was in flight
++          was the cause of the "navbar buttons vanish when I open a URL
++          directly" bug. Only the pieces whose content genuinely depends on
++          identity wait for `loading` to settle. */}
++      <div className='hm-nav-right'>
+ 
+           {/* Authenticated nav links (hidden on mobile — in dropdown instead) */}
+-          {isAuthenticated && !isHostelAdmin && (
++          {!loading && isAuthenticated && !isHostelAdmin && (
+             <div className='hm-nav-links hide-sm'>
+               <Link to='/recommendations' className='hm-nav-link'>Discover</Link>
+               <Link to='/profiles'        className='hm-nav-link'>People</Link>
+@@ -72,8 +77,13 @@ const Navbar = ({ auth: { isAuthenticated, loading }, logout }) => {
+             {theme === 'dark' ? '☀' : '🌙'}
+           </button>
+ 
+-          {/* ── GUEST ── */}
+-          {!isAuthenticated && !isHostelAdmin && (
++          {/* ── GUEST ──
++              Shown while auth is still loading too. A visitor who is in fact
++              logged in sees this for a few hundred milliseconds before it
++              swaps — which is a far better failure than an empty navbar, and
++              is now rare anyway since logged-out visitors no longer wait on a
++              network call at all. */}
++          {(loading || !isAuthenticated) && !isHostelAdmin && (
+             <div className='hm-nav-auth-group' ref={menuRef}>
+               {/* Sign up pill — always visible */}
+               <Link
+@@ -109,7 +119,7 @@ const Navbar = ({ auth: { isAuthenticated, loading }, logout }) => {
+           )}
+ 
+           {/* ── AUTHENTICATED STUDENT ── */}
+-          {isAuthenticated && !isHostelAdmin && (
++          {!loading && isAuthenticated && !isHostelAdmin && (
+             <div className='hm-nav-auth-group' ref={menuRef}>
+               <button
+                 className={`hm-nav-menu-btn${menuOpen ? ' hm-nav-menu-btn--open' : ''}`}
+@@ -151,8 +161,7 @@ const Navbar = ({ auth: { isAuthenticated, loading }, logout }) => {
+             </div>
+           )}
+ 
+-        </div>
+-      )}
++      </div>
+     </nav>
+   );
+ };

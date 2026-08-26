@@ -86,6 +86,19 @@ const SwipeCard = ({ profile, isTop, position, onSwipe, currentUser }) => {
     setSwipeDir(null);
   };
 
+  // Touch equivalents. The card previously bound only mouse events, so on a
+  // phone — the primary target for this app — the swipe gesture did nothing
+  // at all and only the buttons underneath worked.
+  const handleTouchStart = e => { if (isTop) setDragStart(e.touches[0].clientX); };
+  const handleTouchMove  = e => {
+    if (!isTop || dragStart === null) return;
+    const dx = e.touches[0].clientX - dragStart;
+    setDragX(dx);
+    if (dx > 60) setSwipeDir('right');
+    else if (dx < -60) setSwipeDir('left');
+    else setSwipeDir(null);
+  };
+
   const cardStyle = isTop && dragStart !== null ? {
     transform: `translateX(${dragX}px) rotate(${dragX * 0.08}deg)`,
     transition: 'none',
@@ -102,6 +115,10 @@ const SwipeCard = ({ profile, isTop, position, onSwipe, currentUser }) => {
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleMouseUp}
+      onTouchCancel={handleMouseUp}
     >
       {/* Like/Nope labels */}
       {isTop && (
@@ -131,6 +148,11 @@ const SwipeCard = ({ profile, isTop, position, onSwipe, currentUser }) => {
           <span>{displayName}</span>
           <span className={`match-badge ${matchClass}`}>{Math.round(score)}%</span>
         </div>
+        {profile.likesYou && (
+          <p className="swipe-likes-you">
+            <span role="img" aria-label="sparkles">✨</span> They already liked you — swipe right to match
+          </p>
+        )}
         <p className="swipe-card-location">
           {profile.city}{profile.country && `, ${profile.country}`}
           {profile.univ && ` · ${profile.univ}`}
@@ -215,13 +237,16 @@ const Recommended = ({
     if (swipingId) return;
     setSwipingId(id);
 
-    setTimeout(() => {
+    setTimeout(async () => {
       if (direction === 'right') {
         const person = cards.find(c => c._id === id);
-        acceptUser(id);
-        if (person) setMatch(person);
+        // The overlay only fires when the server confirms the like was
+        // reciprocated. It used to fire on every right-swipe, which told the
+        // user they had a mutual match when nobody had swiped back.
+        const result = await acceptUser(id);
+        if (result && result.mutual && person) setMatch(person);
       } else {
-        rejectUser(id);
+        await rejectUser(id);
       }
       setCards(prev => prev.filter(c => c._id !== id));
       setSwipingId(null);

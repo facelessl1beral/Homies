@@ -1,0 +1,1621 @@
+From 746b5e646ed6ba91a6a15798b672cb882e37c809 Mon Sep 17 00:00:00 2001
+From: Homies Dev <dev@homies.local>
+Date: Wed, 26 Aug 2026 06:29:01 +0000
+Subject: [PATCH 1/4] fix: correct the dealbreaker vocabulary and extract the
+ matching engine
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The Discover feed was empty for most users, and had been since the
+dealbreaker pre-filter was introduced.
+
+The filter tested `roomieGender !== 'No preference'` to decide whether a
+user had opted out of the roommate-gender constraint. The questionnaire
+in EditProfile.js never produces that string for that field; its opt-out
+is "Don't Care". So every student who answered the question with the most
+natural answer had the constraint applied literally, matched nobody, and
+saw "You've seen everyone" with zero cards. Students who skipped the
+question saw a full feed. Reproduced against the real option strings:
+"Don't Care" and "Same gender only" each filtered out 100% of candidates.
+
+This was not a logic error. The filter was internally consistent. It was
+a vocabulary error between two halves of the system that had no test
+holding them together, which is exactly the seam §12 of the working
+method says to cover.
+
+Three changes:
+
+1. The engine moves to lib/matching.js as pure functions with no
+   dependency on mongoose or express, so it can be tested without a
+   database. tests/matching.test.js covers it with 23 cases whose
+   fixtures are copied verbatim from the questionnaire's option arrays.
+   Testing it against invented fixtures would have passed while the live
+   feed was empty, so the fixtures are the point.
+
+2. Opt-out is recognised through a NO_CONSTRAINT list rather than one
+   hardcoded string, and missing data on the candidate's side never
+   excludes them. A brand new signup has an empty profile; if absent data
+   could fail a stated preference, every new user would be invisible to
+   every established user, which presents as "the app has no users".
+
+3. Smoking is filtered on `roomieSmoke` (what you asked for) rather than
+   `smoke` (your own habit). The old comparison meant a non-smoker who
+   had explicitly answered "Smoker ok" still had every smoker hidden.
+
+Rejected: folding the other eight roomie* preference fields into the
+filter. They are collected and currently unused, but widening a hard
+filter is what caused this bug, and an over-eager filter fails silently
+and looks like a data problem. If they are to be used they belong in
+scoring, which changes the documented weights and is a decision for the
+author, not a fix.
+
+The five categories and their weights are unchanged, so the README's
+algorithm section remains accurate.
+
+The three inherited test files are deleted. They required mocha, chai and
+chai-http, none of which were in package.json or the lockfile, so
+`npm test` exited with "mocha: not found" and the project had no working
+gate at all. They also wrapped every assertion in
+`.catch(err => console.log(err.message))`, so even once installed they
+would have passed unconditionally, and they asserted a response shape
+(res.body.user._id) this project's User model has not had for some time.
+mocha is now a real devDependency and `npm test` runs.
+
+Does not fix: nothing is tested against a live database. The route
+handlers, auth middleware and booking flow have no coverage yet.
+---
+ lib/matching.js             | 195 +++++++++
+ package-lock.json           | 762 +++++++++++++++++++++++++++++++++---
+ package.json                |   9 +-
+ tests/matching.test.js      | 246 ++++++++++++
+ tests/route-auth.test.js    |  56 ---
+ tests/route_profile.test.js |  99 -----
+ tests/route_user.test.js    |  36 --
+ 7 files changed, 1147 insertions(+), 256 deletions(-)
+ create mode 100644 lib/matching.js
+ create mode 100644 tests/matching.test.js
+ delete mode 100644 tests/route-auth.test.js
+ delete mode 100644 tests/route_profile.test.js
+ delete mode 100644 tests/route_user.test.js
+
+diff --git a/lib/matching.js b/lib/matching.js
+new file mode 100644
+index 0000000..7b7b5e4
+--- /dev/null
++++ b/lib/matching.js
+@@ -0,0 +1,195 @@
++/**
++ * Homies Matching Engine V2
++ * =========================
++ *
++ * Pure functions only. This module deliberately has no dependency on mongoose,
++ * express, or any request object, so that it can be unit tested without a
++ * database. `routes/api/profile.js` is the only caller.
++ *
++ * The engine runs in two stages, in this order:
++ *
++ *   Stage 1 — Dealbreakers. A hard pre-filter. A candidate that fails is
++ *             removed entirely and never scored.
++ *   Stage 2 — Weighted category scoring. Five categories, fixed weights,
++ *             rounded to the nearest integer.
++ *
++ * The weights below are the documented model (README "Matching Algorithm").
++ * If you change them, change the README in the same commit — a scoring model
++ * that disagrees with its own documentation is the failure this project can
++ * least afford to have found during review.
++ */
++
++// ---------------------------------------------------------------------------
++// Shared vocabulary
++// ---------------------------------------------------------------------------
++
++/**
++ * Values that mean "I have no constraint here".
++ *
++ * This list is the fix for the single worst bug in the pre-refactor engine.
++ * The old filter tested `roomieGender !== 'No preference'`, but the
++ * questionnaire in client/src/components/dashboard/EditProfile.js never offers
++ * the string 'No preference' for that field — its opt-out is "Don't Care".
++ * The result was that every user who answered the roommate-gender question
++ * with the most natural answer had *every* candidate filtered out and saw an
++ * empty Discover feed, while users who skipped the question saw a full one.
++ *
++ * Both spellings are accepted so that existing rows written under either
++ * convention keep working, and so that adding an opt-out to another pill group
++ * later does not silently reintroduce the same class of bug.
++ */
++const NO_CONSTRAINT = ["Don't Care", "Don't care", 'No preference', 'Any', 'None', ''];
++
++const hasConstraint = value =>
++  typeof value === 'string' && value.trim() !== '' && !NO_CONSTRAINT.includes(value.trim());
++
++/** Candidates whose own smoking answer counts as "smokes". */
++const SMOKING_ANSWERS = ['Smoker', 'Social smoker'];
++
++// ---------------------------------------------------------------------------
++// Stage 1 — Dealbreakers
++// ---------------------------------------------------------------------------
++
++/**
++ * Decide whether `other` survives `viewer`'s hard filters.
++ *
++ * Deliberately narrow. Only two constraints are enforced as dealbreakers:
++ * roommate gender and "non-smoker only". Everything else the user tells us
++ * about their ideal roommate is a soft signal and belongs in scoring, not in a
++ * filter.
++ *
++ * That restraint is the lesson of the bug this replaces: a hard filter that is
++ * even slightly too eager produces an empty feed, and an empty feed is
++ * indistinguishable from "there are no other users yet". It fails silently and
++ * looks like a data problem rather than a logic problem.
++ *
++ * Missing data on the candidate's side never excludes them. If a viewer asks
++ * for a female roommate and a candidate has not filled in their gender, we
++ * cannot evaluate the constraint, so we let them through rather than hiding
++ * every new signup from everyone who has stated a preference.
++ *
++ * The check is applied in both directions by `passesDealbreakers` — a pairing
++ * only survives if each person is willing to live with the other.
++ */
++const satisfiesPreferences = (viewer, other) => {
++  // --- Roommate gender ------------------------------------------------------
++  if (hasConstraint(viewer.roomieGender) && hasConstraint(other.gender)) {
++    if (viewer.roomieGender === 'Same gender only') {
++      // Only enforceable when we know the viewer's own gender.
++      if (hasConstraint(viewer.gender) && viewer.gender !== other.gender) return false;
++    } else if (viewer.roomieGender !== other.gender) {
++      return false;
++    }
++  }
++
++  // --- Smoking --------------------------------------------------------------
++  // Note this reads `roomieSmoke` (what the viewer asked for), not `smoke`
++  // (the viewer's own habit). The old engine compared own-habit to own-habit,
++  // which meant a non-smoker who had explicitly answered "Smoker ok" still had
++  // every smoker hidden from them — their stated preference was collected and
++  // then ignored.
++  if (viewer.roomieSmoke === 'Non-smoker only' && SMOKING_ANSWERS.includes(other.smoke)) {
++    return false;
++  }
++
++  return true;
++};
++
++/** Mutual dealbreaker check. Both people must be willing. */
++const passesDealbreakers = (current, other) =>
++  satisfiesPreferences(current, other) && satisfiesPreferences(other, current);
++
++// ---------------------------------------------------------------------------
++// Stage 2 — Weighted category scoring
++// ---------------------------------------------------------------------------
++
++const CATEGORIES = [
++  { name: 'lifestyle',   weight: 0.40, fields: ['sleepSchedule', 'cleanliness', 'studyPref', 'social', 'noise', 'guests', 'exercise'] },
++  { name: 'habits',      weight: 0.20, fields: ['food', 'smoke', 'drink', 'cook'] },
++  { name: 'academic',    weight: 0.15, fields: ['univ', 'course', 'sem'] },
++  { name: 'demographic', weight: 0.10, fields: ['gender', 'age', 'country'] },
++  { name: 'hostel',      weight: 0.15, fields: ['preferredHostel', 'roomType', 'floorPref', 'bathroomPref', 'proximityPref'] },
++];
++
++/**
++ * Percentage agreement within one category.
++ *
++ * A field counts toward the denominator when *either* person has answered it.
++ * That is intentional: it means an unanswered field is scored as a
++ * disagreement rather than being quietly skipped, so a half-filled profile
++ * cannot reach 100% by answering only the questions it happens to agree on.
++ */
++const categoryScore = (current, other, fields) => {
++  let matched = 0;
++  let total = 0;
++  fields.forEach(field => {
++    const a = current[field];
++    const b = other[field];
++    if (a || b) {
++      total++;
++      if (a && b && a === b) matched++;
++    }
++  });
++  return total === 0 ? 0 : (matched / total) * 100;
++};
++
++/** Per-category breakdown, useful for explaining a score during review. */
++const scoreBreakdown = (current, other) => {
++  const breakdown = {};
++  CATEGORIES.forEach(c => {
++    breakdown[c.name] = Math.round(categoryScore(current, other, c.fields));
++  });
++  return breakdown;
++};
++
++/** Final compatibility score, 0–100, rounded to the nearest integer. */
++const score = (current, other) =>
++  Math.round(
++    CATEGORIES.reduce(
++      (sum, c) => sum + categoryScore(current, other, c.fields) * c.weight,
++      0
++    )
++  );
++
++// ---------------------------------------------------------------------------
++// Full pipeline
++// ---------------------------------------------------------------------------
++
++/**
++ * Rank candidates for one viewer.
++ *
++ * `candidates` are plain objects (call `.toObject()` on mongoose docs first).
++ * Returns a new array, highest score first, each entry carrying `score`,
++ * `breakdown`, and the viewer's swipe `status` for that person.
++ */
++const rankCandidates = (currentUser, candidates) =>
++  candidates
++    .filter(other => passesDealbreakers(currentUser, other))
++    .map(other => {
++      const id = String(other._id);
++      let status = '-';
++      if (Array.isArray(currentUser.rejected) && currentUser.rejected.map(String).includes(id)) {
++        status = 'Rejected';
++      } else if (Array.isArray(currentUser.accepted) && currentUser.accepted.map(String).includes(id)) {
++        status = 'Accepted';
++      }
++      return {
++        ...other,
++        score: score(currentUser, other),
++        breakdown: scoreBreakdown(currentUser, other),
++        status,
++      };
++    })
++    .sort((a, b) => b.score - a.score);
++
++module.exports = {
++  NO_CONSTRAINT,
++  hasConstraint,
++  satisfiesPreferences,
++  passesDealbreakers,
++  categoryScore,
++  scoreBreakdown,
++  score,
++  rankCandidates,
++  CATEGORIES,
++};
+diff --git a/package-lock.json b/package-lock.json
+index bd61ec6..65b810f 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -22,8 +22,8 @@
+       },
+       "devDependencies": {
+         "concurrently": "^5.3.0",
++        "mocha": "^10.8.2",
+         "nodemon": "^2.0.7",
+-        "should": "^13.2.3",
+         "supertest": "^4.0.2"
+       },
+       "engines": {
+@@ -4807,6 +4807,13 @@
+       "integrity": "sha512-9znBF0vBcaSN3W2j7wKvdERPwqTxSpCq+if5C0WoTCyV9n24rua28jeuQ2pL/HOf+yUe/Mef+H/5p60K0Id3bg==",
+       "license": "MIT"
+     },
++    "node_modules/browser-stdout": {
++      "version": "1.3.1",
++      "resolved": "https://registry.npmjs.org/browser-stdout/-/browser-stdout-1.3.1.tgz",
++      "integrity": "sha512-qhAVI1+Av2X7qelOfAIYwXONood6XlZE/fXaBSmW/T5SzLAmCgzi+eiWE7fUvbHaeNBQH13UftjpXxsfLkMpgw==",
++      "dev": true,
++      "license": "ISC"
++    },
+     "node_modules/browserify-aes": {
+       "version": "1.2.0",
+       "resolved": "https://registry.npmjs.org/browserify-aes/-/browserify-aes-1.2.0.tgz",
+@@ -6860,6 +6867,16 @@
+         "node": ">= 4.2.1"
+       }
+     },
++    "node_modules/diff": {
++      "version": "5.2.2",
++      "resolved": "https://registry.npmjs.org/diff/-/diff-5.2.2.tgz",
++      "integrity": "sha512-vtcDfH3TOjP8UekytvnHH1o1P4FcUdt4eQ1Y+Abap1tk/OB2MWQvcwS2ClCd1zuIhc3JKOx6p3kod8Vfys3E+A==",
++      "dev": true,
++      "license": "BSD-3-Clause",
++      "engines": {
++        "node": ">=0.3.1"
++      }
++    },
+     "node_modules/diff-sequences": {
+       "version": "24.9.0",
+       "resolved": "https://registry.npmjs.org/diff-sequences/-/diff-sequences-24.9.0.tgz",
+@@ -8620,6 +8637,16 @@
+         "node": ">=6"
+       }
+     },
++    "node_modules/flat": {
++      "version": "5.0.2",
++      "resolved": "https://registry.npmjs.org/flat/-/flat-5.0.2.tgz",
++      "integrity": "sha512-b6suED+5/3rTpUBdG1gupIl8MPFCAMA0QXwmljLhvCUKcUvdE4gWky9zpuGCcXHOsz4J9wPGNWq6OKpmIzz3hQ==",
++      "dev": true,
++      "license": "BSD-3-Clause",
++      "bin": {
++        "flat": "cli.js"
++      }
++    },
+     "node_modules/flat-cache": {
+       "version": "2.0.1",
+       "resolved": "https://registry.npmjs.org/flat-cache/-/flat-cache-2.0.1.tgz",
+@@ -10536,6 +10563,16 @@
+         "node": ">=0.10.0"
+       }
+     },
++    "node_modules/is-plain-obj": {
++      "version": "2.1.0",
++      "resolved": "https://registry.npmjs.org/is-plain-obj/-/is-plain-obj-2.1.0.tgz",
++      "integrity": "sha512-YWnfyRwxL/+SsrWYfOpUtz5b3YD+nyfkHvjbcanzk8zgyO4ASD67uVMRt8k5bM4lLMDnXfriRhOpemw+NfT1eA==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
+     "node_modules/is-plain-object": {
+       "version": "2.0.4",
+       "resolved": "https://registry.npmjs.org/is-plain-object/-/is-plain-object-2.0.4.tgz",
+@@ -10686,6 +10723,19 @@
+       "integrity": "sha512-cyA56iCMHAh5CdzjJIa4aohJyeO1YbwLi3Jc35MmRU6poroFjIGZzUzupGiRPOjgHg9TLu43xbpwXk523fMxKA==",
+       "license": "MIT"
+     },
++    "node_modules/is-unicode-supported": {
++      "version": "0.1.0",
++      "resolved": "https://registry.npmjs.org/is-unicode-supported/-/is-unicode-supported-0.1.0.tgz",
++      "integrity": "sha512-knxG2q4UC3u8stRGyAVJCOdxFmv5DZiRcdlIaAQXAbSfJya+OhopNotLQrstBhququ4ZpuKbDc/8S6mgXgPFPw==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
+     "node_modules/is-weakmap": {
+       "version": "2.0.2",
+       "resolved": "https://registry.npmjs.org/is-weakmap/-/is-weakmap-2.0.2.tgz",
+@@ -12309,6 +12359,99 @@
+       "integrity": "sha512-xfBaXQd9ryd9dlSDvnvI0lvxfLJlYAZzXomUYzLKtUeOQvOP5piqAWuGtrhWeqaXK9hhoM/iyJc5AV+XfsX3HQ==",
+       "license": "MIT"
+     },
++    "node_modules/log-symbols": {
++      "version": "4.1.0",
++      "resolved": "https://registry.npmjs.org/log-symbols/-/log-symbols-4.1.0.tgz",
++      "integrity": "sha512-8XPvpAA8uyhfteu8pIvQxpJZ7SYYdpUivZpGy6sFsBuKRY/7rQGavedeB8aK+Zkyq6upMFVL/9AW6vOYzfRyLg==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "chalk": "^4.1.0",
++        "is-unicode-supported": "^0.1.0"
++      },
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
++    "node_modules/log-symbols/node_modules/ansi-styles": {
++      "version": "4.3.0",
++      "resolved": "https://registry.npmjs.org/ansi-styles/-/ansi-styles-4.3.0.tgz",
++      "integrity": "sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "color-convert": "^2.0.1"
++      },
++      "engines": {
++        "node": ">=8"
++      },
++      "funding": {
++        "url": "https://github.com/chalk/ansi-styles?sponsor=1"
++      }
++    },
++    "node_modules/log-symbols/node_modules/chalk": {
++      "version": "4.1.2",
++      "resolved": "https://registry.npmjs.org/chalk/-/chalk-4.1.2.tgz",
++      "integrity": "sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "ansi-styles": "^4.1.0",
++        "supports-color": "^7.1.0"
++      },
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/chalk/chalk?sponsor=1"
++      }
++    },
++    "node_modules/log-symbols/node_modules/color-convert": {
++      "version": "2.0.1",
++      "resolved": "https://registry.npmjs.org/color-convert/-/color-convert-2.0.1.tgz",
++      "integrity": "sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "color-name": "~1.1.4"
++      },
++      "engines": {
++        "node": ">=7.0.0"
++      }
++    },
++    "node_modules/log-symbols/node_modules/color-name": {
++      "version": "1.1.4",
++      "resolved": "https://registry.npmjs.org/color-name/-/color-name-1.1.4.tgz",
++      "integrity": "sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/log-symbols/node_modules/has-flag": {
++      "version": "4.0.0",
++      "resolved": "https://registry.npmjs.org/has-flag/-/has-flag-4.0.0.tgz",
++      "integrity": "sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/log-symbols/node_modules/supports-color": {
++      "version": "7.2.0",
++      "resolved": "https://registry.npmjs.org/supports-color/-/supports-color-7.2.0.tgz",
++      "integrity": "sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "has-flag": "^4.0.0"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
+     "node_modules/loglevel": {
+       "version": "1.9.2",
+       "resolved": "https://registry.npmjs.org/loglevel/-/loglevel-1.9.2.tgz",
+@@ -12889,6 +13032,501 @@
+         "mkdirp": "bin/cmd.js"
+       }
+     },
++    "node_modules/mocha": {
++      "version": "10.8.2",
++      "resolved": "https://registry.npmjs.org/mocha/-/mocha-10.8.2.tgz",
++      "integrity": "sha512-VZlYo/WE8t1tstuRmqgeyBgCbJc/lEdopaa+axcKzTBJ+UIdlAB9XnmvTCAH4pwR4ElNInaedhEBmZD8iCSVEg==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "ansi-colors": "^4.1.3",
++        "browser-stdout": "^1.3.1",
++        "chokidar": "^3.5.3",
++        "debug": "^4.3.5",
++        "diff": "^5.2.0",
++        "escape-string-regexp": "^4.0.0",
++        "find-up": "^5.0.0",
++        "glob": "^8.1.0",
++        "he": "^1.2.0",
++        "js-yaml": "^4.1.0",
++        "log-symbols": "^4.1.0",
++        "minimatch": "^5.1.6",
++        "ms": "^2.1.3",
++        "serialize-javascript": "^6.0.2",
++        "strip-json-comments": "^3.1.1",
++        "supports-color": "^8.1.1",
++        "workerpool": "^6.5.1",
++        "yargs": "^16.2.0",
++        "yargs-parser": "^20.2.9",
++        "yargs-unparser": "^2.0.0"
++      },
++      "bin": {
++        "_mocha": "bin/_mocha",
++        "mocha": "bin/mocha.js"
++      },
++      "engines": {
++        "node": ">= 14.0.0"
++      }
++    },
++    "node_modules/mocha/node_modules/ansi-colors": {
++      "version": "4.1.3",
++      "resolved": "https://registry.npmjs.org/ansi-colors/-/ansi-colors-4.1.3.tgz",
++      "integrity": "sha512-/6w/C21Pm1A7aZitlI5Ni/2J6FFQN8i1Cvz3kHABAAbw93v/NlvKdVOqz7CCWz/3iv/JplRSEEZ83XION15ovw==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=6"
++      }
++    },
++    "node_modules/mocha/node_modules/ansi-regex": {
++      "version": "5.0.1",
++      "resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-5.0.1.tgz",
++      "integrity": "sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/mocha/node_modules/ansi-styles": {
++      "version": "4.3.0",
++      "resolved": "https://registry.npmjs.org/ansi-styles/-/ansi-styles-4.3.0.tgz",
++      "integrity": "sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "color-convert": "^2.0.1"
++      },
++      "engines": {
++        "node": ">=8"
++      },
++      "funding": {
++        "url": "https://github.com/chalk/ansi-styles?sponsor=1"
++      }
++    },
++    "node_modules/mocha/node_modules/argparse": {
++      "version": "2.0.1",
++      "resolved": "https://registry.npmjs.org/argparse/-/argparse-2.0.1.tgz",
++      "integrity": "sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==",
++      "dev": true,
++      "license": "Python-2.0"
++    },
++    "node_modules/mocha/node_modules/brace-expansion": {
++      "version": "2.1.4",
++      "resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-2.1.4.tgz",
++      "integrity": "sha512-hGfVzPxthbf3+2yjg/RBs60cB0FhqBS/zvdV/4wn4/BmN0bNMMHPc4V/BbFieqf1TKAGGAHnY4eSjajCl0f2Xg==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "balanced-match": "^1.0.0"
++      }
++    },
++    "node_modules/mocha/node_modules/chokidar": {
++      "version": "3.6.0",
++      "resolved": "https://registry.npmjs.org/chokidar/-/chokidar-3.6.0.tgz",
++      "integrity": "sha512-7VT13fmjotKpGipCW9JEQAusEPE+Ei8nl6/g4FBAmIm0GOOLMua9NDDo/DWp0ZAxCr3cPq5ZpBqmPAQgDda2Pw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "anymatch": "~3.1.2",
++        "braces": "~3.0.2",
++        "glob-parent": "~5.1.2",
++        "is-binary-path": "~2.1.0",
++        "is-glob": "~4.0.1",
++        "normalize-path": "~3.0.0",
++        "readdirp": "~3.6.0"
++      },
++      "engines": {
++        "node": ">= 8.10.0"
++      },
++      "funding": {
++        "url": "https://paulmillr.com/funding/"
++      },
++      "optionalDependencies": {
++        "fsevents": "~2.3.2"
++      }
++    },
++    "node_modules/mocha/node_modules/cliui": {
++      "version": "7.0.4",
++      "resolved": "https://registry.npmjs.org/cliui/-/cliui-7.0.4.tgz",
++      "integrity": "sha512-OcRE68cOsVMXp1Yvonl/fzkQOyjLSu/8bhPDfQt0e0/Eb283TKP20Fs2MqoPsr9SwA595rRCA+QMzYc9nBP+JQ==",
++      "dev": true,
++      "license": "ISC",
++      "dependencies": {
++        "string-width": "^4.2.0",
++        "strip-ansi": "^6.0.0",
++        "wrap-ansi": "^7.0.0"
++      }
++    },
++    "node_modules/mocha/node_modules/color-convert": {
++      "version": "2.0.1",
++      "resolved": "https://registry.npmjs.org/color-convert/-/color-convert-2.0.1.tgz",
++      "integrity": "sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "color-name": "~1.1.4"
++      },
++      "engines": {
++        "node": ">=7.0.0"
++      }
++    },
++    "node_modules/mocha/node_modules/color-name": {
++      "version": "1.1.4",
++      "resolved": "https://registry.npmjs.org/color-name/-/color-name-1.1.4.tgz",
++      "integrity": "sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/mocha/node_modules/debug": {
++      "version": "4.4.3",
++      "resolved": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
++      "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "ms": "^2.1.3"
++      },
++      "engines": {
++        "node": ">=6.0"
++      },
++      "peerDependenciesMeta": {
++        "supports-color": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/mocha/node_modules/emoji-regex": {
++      "version": "8.0.0",
++      "resolved": "https://registry.npmjs.org/emoji-regex/-/emoji-regex-8.0.0.tgz",
++      "integrity": "sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/mocha/node_modules/escape-string-regexp": {
++      "version": "4.0.0",
++      "resolved": "https://registry.npmjs.org/escape-string-regexp/-/escape-string-regexp-4.0.0.tgz",
++      "integrity": "sha512-TtpcNJ3XAzx3Gq8sWRzJaVajRs0uVxA2YAkdb1jm2YkPz4G6egUFAyA3n5vtEIZefPk5Wa4UXbKuS5fKkJWdgA==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
++    "node_modules/mocha/node_modules/find-up": {
++      "version": "5.0.0",
++      "resolved": "https://registry.npmjs.org/find-up/-/find-up-5.0.0.tgz",
++      "integrity": "sha512-78/PXT1wlLLDgTzDs7sjq9hzz0vXD+zn+7wypEe4fXQxCmdmqfGsEPQxmiCSQI3ajFV91bVSsvNtrJRiW6nGng==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "locate-path": "^6.0.0",
++        "path-exists": "^4.0.0"
++      },
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
++    "node_modules/mocha/node_modules/fsevents": {
++      "version": "2.3.3",
++      "resolved": "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz",
++      "integrity": "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==",
++      "dev": true,
++      "hasInstallScript": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": "^8.16.0 || ^10.6.0 || >=11.0.0"
++      }
++    },
++    "node_modules/mocha/node_modules/glob": {
++      "version": "8.1.0",
++      "resolved": "https://registry.npmjs.org/glob/-/glob-8.1.0.tgz",
++      "integrity": "sha512-r8hpEjiQEYlF2QU0df3dS+nxxSIreXQS1qRhMJM0Q5NDdR386C7jb7Hwwod8Fgiuex+k0GFjgft18yvxm5XoCQ==",
++      "deprecated": "Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me",
++      "dev": true,
++      "license": "ISC",
++      "dependencies": {
++        "fs.realpath": "^1.0.0",
++        "inflight": "^1.0.4",
++        "inherits": "2",
++        "minimatch": "^5.0.1",
++        "once": "^1.3.0"
++      },
++      "engines": {
++        "node": ">=12"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/isaacs"
++      }
++    },
++    "node_modules/mocha/node_modules/has-flag": {
++      "version": "4.0.0",
++      "resolved": "https://registry.npmjs.org/has-flag/-/has-flag-4.0.0.tgz",
++      "integrity": "sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/mocha/node_modules/is-fullwidth-code-point": {
++      "version": "3.0.0",
++      "resolved": "https://registry.npmjs.org/is-fullwidth-code-point/-/is-fullwidth-code-point-3.0.0.tgz",
++      "integrity": "sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/mocha/node_modules/js-yaml": {
++      "version": "4.3.1",
++      "resolved": "https://registry.npmjs.org/js-yaml/-/js-yaml-4.3.1.tgz",
++      "integrity": "sha512-CY6crGq313MX8GkwvB7tzgp99vjQxY1++5y10/BKN/GUfHqWaOGQMNZkBvqSzsZKWk/ijwHlWzzkLulsGHhjWQ==",
++      "dev": true,
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/puzrin"
++        },
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/nodeca"
++        }
++      ],
++      "license": "MIT",
++      "dependencies": {
++        "argparse": "^2.0.1"
++      },
++      "bin": {
++        "js-yaml": "bin/js-yaml.js"
++      }
++    },
++    "node_modules/mocha/node_modules/locate-path": {
++      "version": "6.0.0",
++      "resolved": "https://registry.npmjs.org/locate-path/-/locate-path-6.0.0.tgz",
++      "integrity": "sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "p-locate": "^5.0.0"
++      },
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
++    "node_modules/mocha/node_modules/minimatch": {
++      "version": "5.1.9",
++      "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-5.1.9.tgz",
++      "integrity": "sha512-7o1wEA2RyMP7Iu7GNba9vc0RWWGACJOCZBJX2GJWip0ikV+wcOsgVuY9uE8CPiyQhkGFSlhuSkZPavN7u1c2Fw==",
++      "dev": true,
++      "license": "ISC",
++      "dependencies": {
++        "brace-expansion": "^2.0.1"
++      },
++      "engines": {
++        "node": ">=10"
++      }
++    },
++    "node_modules/mocha/node_modules/ms": {
++      "version": "2.1.3",
++      "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
++      "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/mocha/node_modules/p-limit": {
++      "version": "3.1.0",
++      "resolved": "https://registry.npmjs.org/p-limit/-/p-limit-3.1.0.tgz",
++      "integrity": "sha512-TYOanM3wGwNGsZN2cVTYPArw454xnXj5qmWF1bEoAc4+cU/ol7GVh7odevjp1FNHduHc3KZMcFduxU5Xc6uJRQ==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "yocto-queue": "^0.1.0"
++      },
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
++    "node_modules/mocha/node_modules/p-locate": {
++      "version": "5.0.0",
++      "resolved": "https://registry.npmjs.org/p-locate/-/p-locate-5.0.0.tgz",
++      "integrity": "sha512-LaNjtRWUBY++zB5nE/NwcaoMylSPk+S+ZHNB1TzdbMJMny6dynpAGt7X/tl/QYq3TIeE6nxHppbo2LGymrG5Pw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "p-limit": "^3.0.2"
++      },
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
++    "node_modules/mocha/node_modules/path-exists": {
++      "version": "4.0.0",
++      "resolved": "https://registry.npmjs.org/path-exists/-/path-exists-4.0.0.tgz",
++      "integrity": "sha512-ak9Qy5Q7jYb2Wwcey5Fpvg2KoAc/ZIhLSLOSBmRmygPsGwkVVt0fZa0qrtMz+m6tJTAHfZQ8FnmB4MG4LWy7/w==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/mocha/node_modules/readdirp": {
++      "version": "3.6.0",
++      "resolved": "https://registry.npmjs.org/readdirp/-/readdirp-3.6.0.tgz",
++      "integrity": "sha512-hOS089on8RduqdbhvQ5Z37A0ESjsqz6qnRcffsMU3495FuTdqSm+7bhJ29JvIOsBDEEnan5DPu9t3To9VRlMzA==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "picomatch": "^2.2.1"
++      },
++      "engines": {
++        "node": ">=8.10.0"
++      }
++    },
++    "node_modules/mocha/node_modules/serialize-javascript": {
++      "version": "6.0.2",
++      "resolved": "https://registry.npmjs.org/serialize-javascript/-/serialize-javascript-6.0.2.tgz",
++      "integrity": "sha512-Saa1xPByTTq2gdeFZYLLo+RFE35NHZkAbqZeWNd3BpzppeVisAqpDjcp8dyf6uIvEqJRd46jemmyA4iFIeVk8g==",
++      "dev": true,
++      "license": "BSD-3-Clause",
++      "dependencies": {
++        "randombytes": "^2.1.0"
++      }
++    },
++    "node_modules/mocha/node_modules/string-width": {
++      "version": "4.2.3",
++      "resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
++      "integrity": "sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "emoji-regex": "^8.0.0",
++        "is-fullwidth-code-point": "^3.0.0",
++        "strip-ansi": "^6.0.1"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/mocha/node_modules/strip-ansi": {
++      "version": "6.0.1",
++      "resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz",
++      "integrity": "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "ansi-regex": "^5.0.1"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/mocha/node_modules/strip-json-comments": {
++      "version": "3.1.1",
++      "resolved": "https://registry.npmjs.org/strip-json-comments/-/strip-json-comments-3.1.1.tgz",
++      "integrity": "sha512-6fPc+R4ihwqP6N/aIv2f1gMH8lOVtWQHoqC4yK6oSDVVocumAsfCqjkXnqiYMhmMwS/mEHLp7Vehlt3ql6lEig==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
++    "node_modules/mocha/node_modules/supports-color": {
++      "version": "8.1.1",
++      "resolved": "https://registry.npmjs.org/supports-color/-/supports-color-8.1.1.tgz",
++      "integrity": "sha512-MpUEN2OodtUzxvKQl72cUF7RQ5EiHsGvSsVG0ia9c5RbWGL2CI4C7EpPS8UTBIplnlzZiNuV56w+FuNxy3ty2Q==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "has-flag": "^4.0.0"
++      },
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/chalk/supports-color?sponsor=1"
++      }
++    },
++    "node_modules/mocha/node_modules/wrap-ansi": {
++      "version": "7.0.0",
++      "resolved": "https://registry.npmjs.org/wrap-ansi/-/wrap-ansi-7.0.0.tgz",
++      "integrity": "sha512-YVGIj2kamLSTxw6NsZjoBxfSwsn0ycdesmc4p+Q21c5zPuZ1pl+NfxVdxPtdHvmNVOQ6XSYG4AUtyt/Fi7D16Q==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "ansi-styles": "^4.0.0",
++        "string-width": "^4.1.0",
++        "strip-ansi": "^6.0.0"
++      },
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/chalk/wrap-ansi?sponsor=1"
++      }
++    },
++    "node_modules/mocha/node_modules/y18n": {
++      "version": "5.0.8",
++      "resolved": "https://registry.npmjs.org/y18n/-/y18n-5.0.8.tgz",
++      "integrity": "sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA==",
++      "dev": true,
++      "license": "ISC",
++      "engines": {
++        "node": ">=10"
++      }
++    },
++    "node_modules/mocha/node_modules/yargs": {
++      "version": "16.2.2",
++      "resolved": "https://registry.npmjs.org/yargs/-/yargs-16.2.2.tgz",
++      "integrity": "sha512-Nt9ZJjXTv5R8MHbqby/wXQ6Gi0Bb3TcYZkR1bzuL4yB2OxWPkXknz513gEF0GoA6tn00UpbPvERW8rzCuWCA6w==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "cliui": "^7.0.2",
++        "escalade": "^3.1.1",
++        "get-caller-file": "^2.0.5",
++        "require-directory": "^2.1.1",
++        "string-width": "^4.2.0",
++        "y18n": "^5.0.5",
++        "yargs-parser": "^20.2.2"
++      },
++      "engines": {
++        "node": ">=10"
++      }
++    },
++    "node_modules/mocha/node_modules/yargs-parser": {
++      "version": "20.2.9",
++      "resolved": "https://registry.npmjs.org/yargs-parser/-/yargs-parser-20.2.9.tgz",
++      "integrity": "sha512-y11nGElTIV+CT3Zv9t7VKl+Q3hTQoT9a1Qzezhhl6Rp21gJ/IVTW7Z3y9EWXhuUBC2Shnf+DX0antecpAwSP8w==",
++      "dev": true,
++      "license": "ISC",
++      "engines": {
++        "node": ">=10"
++      }
++    },
+     "node_modules/moment": {
+       "version": "2.30.1",
+       "resolved": "https://registry.npmjs.org/moment/-/moment-2.30.1.tgz",
+@@ -17946,66 +18584,6 @@
+       "integrity": "sha512-vFwSUfQvqybiICwZY5+DAWIPLKsWO31Q91JSKl3UYv+K5c2QRPzn0qzec6QPu1Qc9eHYItiP3NdJqNVqetYAww==",
+       "license": "MIT"
+     },
+-    "node_modules/should": {
+-      "version": "13.2.3",
+-      "resolved": "https://registry.npmjs.org/should/-/should-13.2.3.tgz",
+-      "integrity": "sha512-ggLesLtu2xp+ZxI+ysJTmNjh2U0TsC+rQ/pfED9bUZZ4DKefP27D+7YJVVTvKsmjLpIi9jAa7itwDGkDDmt1GQ==",
+-      "dev": true,
+-      "license": "MIT",
+-      "dependencies": {
+-        "should-equal": "^2.0.0",
+-        "should-format": "^3.0.3",
+-        "should-type": "^1.4.0",
+-        "should-type-adaptors": "^1.0.1",
+-        "should-util": "^1.0.0"
+-      }
+-    },
+-    "node_modules/should-equal": {
+-      "version": "2.0.0",
+-      "resolved": "https://registry.npmjs.org/should-equal/-/should-equal-2.0.0.tgz",
+-      "integrity": "sha512-ZP36TMrK9euEuWQYBig9W55WPC7uo37qzAEmbjHz4gfyuXrEUgF8cUvQVO+w+d3OMfPvSRQJ22lSm8MQJ43LTA==",
+-      "dev": true,
+-      "license": "MIT",
+-      "dependencies": {
+-        "should-type": "^1.4.0"
+-      }
+-    },
+-    "node_modules/should-format": {
+-      "version": "3.0.3",
+-      "resolved": "https://registry.npmjs.org/should-format/-/should-format-3.0.3.tgz",
+-      "integrity": "sha512-hZ58adtulAk0gKtua7QxevgUaXTTXxIi8t41L3zo9AHvjXO1/7sdLECuHeIN2SRtYXpNkmhoUP2pdeWgricQ+Q==",
+-      "dev": true,
+-      "license": "MIT",
+-      "dependencies": {
+-        "should-type": "^1.3.0",
+-        "should-type-adaptors": "^1.0.1"
+-      }
+-    },
+-    "node_modules/should-type": {
+-      "version": "1.4.0",
+-      "resolved": "https://registry.npmjs.org/should-type/-/should-type-1.4.0.tgz",
+-      "integrity": "sha512-MdAsTu3n25yDbIe1NeN69G4n6mUnJGtSJHygX3+oN0ZbO3DTiATnf7XnYJdGT42JCXurTb1JI0qOBR65shvhPQ==",
+-      "dev": true,
+-      "license": "MIT"
+-    },
+-    "node_modules/should-type-adaptors": {
+-      "version": "1.1.0",
+-      "resolved": "https://registry.npmjs.org/should-type-adaptors/-/should-type-adaptors-1.1.0.tgz",
+-      "integrity": "sha512-JA4hdoLnN+kebEp2Vs8eBe9g7uy0zbRo+RMcU0EsNy+R+k049Ki+N5tT5Jagst2g7EAja+euFuoXFCa8vIklfA==",
+-      "dev": true,
+-      "license": "MIT",
+-      "dependencies": {
+-        "should-type": "^1.3.0",
+-        "should-util": "^1.0.0"
+-      }
+-    },
+-    "node_modules/should-util": {
+-      "version": "1.0.1",
+-      "resolved": "https://registry.npmjs.org/should-util/-/should-util-1.0.1.tgz",
+-      "integrity": "sha512-oXF8tfxx5cDk8r2kYqlkUJzZpDBqVY/II2WhvU0n9Y3XYvAYRmeaf1PvvIvTgPnv4KJ+ES5M0PyDq5Jp+Ygy2g==",
+-      "dev": true,
+-      "license": "MIT"
+-    },
+     "node_modules/side-channel": {
+       "version": "1.1.1",
+       "resolved": "https://registry.npmjs.org/side-channel/-/side-channel-1.1.1.tgz",
+@@ -21105,6 +21683,13 @@
+         "microevent.ts": "~0.1.1"
+       }
+     },
++    "node_modules/workerpool": {
++      "version": "6.5.1",
++      "resolved": "https://registry.npmjs.org/workerpool/-/workerpool-6.5.1.tgz",
++      "integrity": "sha512-Fs4dNYcsdpYSAfVxhnl1L5zTksjvOJxtC5hzMNl+1t9B8hTJTdKDyZ5ju7ztgPy+ft9tBFXoOlDNiOT9WUXZlA==",
++      "dev": true,
++      "license": "Apache-2.0"
++    },
+     "node_modules/wrap-ansi": {
+       "version": "5.1.0",
+       "resolved": "https://registry.npmjs.org/wrap-ansi/-/wrap-ansi-5.1.0.tgz",
+@@ -21277,6 +21862,48 @@
+         "decamelize": "^1.2.0"
+       }
+     },
++    "node_modules/yargs-unparser": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/yargs-unparser/-/yargs-unparser-2.0.0.tgz",
++      "integrity": "sha512-7pRTIA9Qc1caZ0bZ6RYRGbHJthJWuakf+WmHK0rVeLkNrrGhfoabBNdue6kdINI6r4if7ocq9aD/n7xwKOdzOA==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "camelcase": "^6.0.0",
++        "decamelize": "^4.0.0",
++        "flat": "^5.0.2",
++        "is-plain-obj": "^2.1.0"
++      },
++      "engines": {
++        "node": ">=10"
++      }
++    },
++    "node_modules/yargs-unparser/node_modules/camelcase": {
++      "version": "6.3.0",
++      "resolved": "https://registry.npmjs.org/camelcase/-/camelcase-6.3.0.tgz",
++      "integrity": "sha512-Gmy6FhYlCY7uOElZUSbxo2UCDH8owEk996gkbrpsgGtrJLM3J7jGxl9Ic7Qwwj4ivOE5AWZWRMecDdF7hqGjFA==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
++    "node_modules/yargs-unparser/node_modules/decamelize": {
++      "version": "4.0.0",
++      "resolved": "https://registry.npmjs.org/decamelize/-/decamelize-4.0.0.tgz",
++      "integrity": "sha512-9iE1PgSik9HeIIw2JO94IidnE3eBoQrFJ3w7sFuzSX4DpmZ3v5sZpUiV5Swcf6mQEF+Y0ru8Neo+p+nyh2J+hQ==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
+     "node_modules/yargs/node_modules/ansi-regex": {
+       "version": "4.1.1",
+       "resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-4.1.1.tgz",
+@@ -21311,6 +21938,19 @@
+       "engines": {
+         "node": ">=6"
+       }
++    },
++    "node_modules/yocto-queue": {
++      "version": "0.1.0",
++      "resolved": "https://registry.npmjs.org/yocto-queue/-/yocto-queue-0.1.0.tgz",
++      "integrity": "sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
+     }
+   }
+ }
+diff --git a/package.json b/package.json
+index 94ea7d1..b01f75b 100644
+--- a/package.json
++++ b/package.json
+@@ -8,8 +8,9 @@
+     "server": "nodemon server",
+     "client": "npm start --prefix client",
+     "dev": "concurrently \"npm run server\" \"npm run client\"",
+-    "test": "mocha tests/*.js --exit",
+-    "heroku-postbuild": "NPM_CONFIG_PRODUCTION=false npm install --prefix client && npm run build --prefix client"
++    "test": "mocha tests/*.test.js --exit",
++    "heroku-postbuild": "NPM_CONFIG_PRODUCTION=false npm install --prefix client && npm run build --prefix client",
++    "test:watch": "mocha tests/*.test.js --watch"
+   },
+   "engines": {
+     "node": ">=18.0.0"
+@@ -32,7 +33,7 @@
+   "devDependencies": {
+     "concurrently": "^5.3.0",
+     "nodemon": "^2.0.7",
+-    "should": "^13.2.3",
+-    "supertest": "^4.0.2"
++    "supertest": "^4.0.2",
++    "mocha": "^10.8.2"
+   }
+ }
+diff --git a/tests/matching.test.js b/tests/matching.test.js
+new file mode 100644
+index 0000000..e191860
+--- /dev/null
++++ b/tests/matching.test.js
+@@ -0,0 +1,246 @@
++/**
++ * Matching engine tests.
++ *
++ * Placed in the top rigour tier (see docs/working-method.md §12) because this
++ * is the code that decides who is allowed to see whom. It has a small number
++ * of cases and a definite right answer, and it has been wrong once already.
++ *
++ * IMPORTANT — the option strings in these fixtures are copied verbatim from
++ * client/src/components/dashboard/EditProfile.js. That is the whole point of
++ * the suite. The original bug was not a logic error; the logic was internally
++ * consistent. It was a *vocabulary* error: the server tested for a sentinel
++ * string ('No preference') that the questionnaire never produces for that
++ * field. Tests written against invented fixtures would have passed happily
++ * while the live feed was empty.
++ *
++ * If you add or rename a pill option in EditProfile.js, update these fixtures
++ * in the same commit.
++ */
++
++const assert = require('assert');
++const {
++  passesDealbreakers,
++  satisfiesPreferences,
++  categoryScore,
++  score,
++  rankCandidates,
++} = require('../lib/matching');
++
++// --- Fixtures --------------------------------------------------------------
++// Verbatim option values from the questionnaire:
++//   gender       : Male | Female | Non-Binary | Transgender | Intersex | Prefer not to say
++//   roomieGender : Male | Female | Non-Binary | Same gender only | Don't Care
++//   smoke        : Non-smoker | Social smoker | Smoker | Trying to quit
++//   roomieSmoke  : Non-smoker only | Smoker ok | Don't Care
++
++const student = (overrides = {}) => ({
++  _id: overrides._id || 'id-' + Math.random().toString(36).slice(2),
++  gender: '', age: '', country: '', univ: '', course: '', sem: '',
++  sleepSchedule: '', cleanliness: '', studyPref: '', social: '', noise: '', guests: '', exercise: '',
++  food: '', smoke: '', drink: '', cook: '',
++  preferredHostel: '', roomType: '', floorPref: '', bathroomPref: '', proximityPref: '',
++  roomieGender: '', roomieSmoke: '',
++  accepted: [], rejected: [],
++  ...overrides,
++});
++
++describe('Matching engine — Stage 1: dealbreakers', () => {
++
++  describe('regression: the opt-out answers must not empty the feed', () => {
++    // These four cases are the bug that this module was extracted to fix.
++    // Before the fix, "Don't Care" and "Same gender only" each filtered out
++    // 100% of candidates, because the server only recognised 'No preference'
++    // as an opt-out and that string is not in the questionnaire.
++
++    it('"Don\'t Care" imposes no gender constraint', () => {
++      const me = student({ gender: 'Male', roomieGender: "Don't Care" });
++      const pool = [
++        student({ gender: 'Male' }),
++        student({ gender: 'Female' }),
++        student({ gender: 'Non-Binary' }),
++        student({ gender: 'Prefer not to say' }),
++      ];
++      const survivors = pool.filter(o => passesDealbreakers(me, o));
++      assert.strictEqual(survivors.length, 4, 'every candidate should survive "Don\'t Care"');
++    });
++
++    it('"Same gender only" keeps same-gender candidates and drops others', () => {
++      const me = student({ gender: 'Male', roomieGender: 'Same gender only' });
++      assert.strictEqual(passesDealbreakers(me, student({ gender: 'Male' })), true);
++      assert.strictEqual(passesDealbreakers(me, student({ gender: 'Female' })), false);
++    });
++
++    it('an unanswered roommate-gender question imposes no constraint', () => {
++      const me = student({ gender: 'Male', roomieGender: '' });
++      assert.strictEqual(passesDealbreakers(me, student({ gender: 'Female' })), true);
++    });
++
++    it('a specific gender preference is honoured', () => {
++      const me = student({ gender: 'Male', roomieGender: 'Female' });
++      assert.strictEqual(satisfiesPreferences(me, student({ gender: 'Female' })), true);
++      assert.strictEqual(satisfiesPreferences(me, student({ gender: 'Male' })), false);
++    });
++  });
++
++  describe('new and incomplete profiles stay discoverable', () => {
++    // A brand new signup has an empty profile. If a stated preference could be
++    // failed by absent data, every new user would be invisible to every
++    // established user — which looks exactly like "the app has no users".
++
++    it('does not exclude a candidate whose gender is unset', () => {
++      const me = student({ gender: 'Male', roomieGender: 'Female' });
++      assert.strictEqual(satisfiesPreferences(me, student({ gender: '' })), true);
++    });
++
++    it('does not exclude a candidate whose smoking answer is unset', () => {
++      const me = student({ roomieSmoke: 'Non-smoker only' });
++      assert.strictEqual(satisfiesPreferences(me, student({ smoke: '' })), true);
++    });
++
++    it('an empty profile matches an empty profile', () => {
++      assert.strictEqual(passesDealbreakers(student(), student()), true);
++    });
++  });
++
++  describe('smoking is filtered on the stated preference, not on own habit', () => {
++    // The old engine compared current.smoke to other.smoke, so a non-smoker
++    // who had explicitly answered "Smoker ok" still had all smokers hidden.
++    // Their answer was collected and then ignored.
++
++    it('"Non-smoker only" excludes smokers and social smokers', () => {
++      const me = student({ roomieSmoke: 'Non-smoker only' });
++      assert.strictEqual(satisfiesPreferences(me, student({ smoke: 'Smoker' })), false);
++      assert.strictEqual(satisfiesPreferences(me, student({ smoke: 'Social smoker' })), false);
++    });
++
++    it('"Non-smoker only" admits non-smokers and those trying to quit', () => {
++      const me = student({ roomieSmoke: 'Non-smoker only' });
++      assert.strictEqual(satisfiesPreferences(me, student({ smoke: 'Non-smoker' })), true);
++      assert.strictEqual(satisfiesPreferences(me, student({ smoke: 'Trying to quit' })), true);
++    });
++
++    it('a non-smoker who said "Smoker ok" still sees smokers', () => {
++      const me = student({ smoke: 'Non-smoker', roomieSmoke: 'Smoker ok' });
++      assert.strictEqual(satisfiesPreferences(me, student({ smoke: 'Smoker' })), true);
++    });
++
++    it('own smoking habit alone never excludes anyone', () => {
++      const me = student({ smoke: 'Non-smoker', roomieSmoke: '' });
++      assert.strictEqual(passesDealbreakers(me, student({ smoke: 'Smoker' })), true);
++    });
++  });
++
++  describe('dealbreakers apply in both directions', () => {
++    it('rejects the pairing when only the candidate objects', () => {
++      const me    = student({ gender: 'Male',   roomieGender: "Don't Care" });
++      const them  = student({ gender: 'Female', roomieGender: 'Female' });
++      assert.strictEqual(satisfiesPreferences(me, them), true, 'viewer is willing');
++      assert.strictEqual(passesDealbreakers(me, them), false, 'candidate is not');
++    });
++  });
++});
++
++describe('Matching engine — Stage 2: weighted scoring', () => {
++
++  it('two identical fully-filled profiles score 100', () => {
++    const shared = {
++      sleepSchedule: 'Night owl (after 12am)', cleanliness: 'Moderate', studyPref: 'Library',
++      social: 'Moderate', noise: 'Quiet please', guests: 'Occasionally', exercise: 'Often',
++      food: 'Halal', smoke: 'Non-smoker', drink: 'Non-drinker', cook: 'Learning',
++      univ: 'Kyambogo University', course: 'BSc IS', sem: 'Year 4',
++      gender: 'Male', age: '18-24', country: 'Uganda',
++      preferredHostel: 'Olympia', roomType: 'Double', floorPref: 'First floor',
++      bathroomPref: 'En-suite', proximityPref: 'Library',
++    };
++    assert.strictEqual(score(student(shared), student(shared)), 100);
++  });
++
++  it('two fully-filled profiles that agree on nothing score 0', () => {
++    const a = student({ sleepSchedule: 'Early bird (before 10pm)', food: 'Vegan',   univ: 'KYU', gender: 'Male',   roomType: 'Single' });
++    const b = student({ sleepSchedule: 'Night owl (after 12am)',    food: 'Halal',  univ: 'MUK', gender: 'Female', roomType: 'Double' });
++    assert.strictEqual(score(a, b), 0);
++  });
++
++  it('two empty profiles score 0 rather than 100', () => {
++    // Guards against the "vacuously perfect match" reading of the formula:
++    // with no answers there is no evidence of compatibility, so 0 is correct
++    // and 100 would be actively misleading on a swipe card.
++    assert.strictEqual(score(student(), student()), 0);
++  });
++
++  it('an unanswered field counts against the score, it is not skipped', () => {
++    // One side answers both lifestyle fields, the other answers one and agrees
++    // on it. 1 of 2 fields in play => 50% of the lifestyle category.
++    const a = student({ sleepSchedule: 'Night owl (after 12am)', cleanliness: 'Moderate' });
++    const b = student({ sleepSchedule: 'Night owl (after 12am)' });
++    assert.strictEqual(categoryScore(a, b, ['sleepSchedule', 'cleanliness']), 50);
++  });
++
++  it('applies the documented category weights', () => {
++    // Perfect lifestyle agreement and nothing else answered should yield
++    // exactly the lifestyle weight: 100 x 0.40 = 40.
++    const lifestyle = {
++      sleepSchedule: 'Regular (10pm–12am)', cleanliness: 'Very organised', studyPref: 'In my room',
++      social: 'Private', noise: 'Moderate', guests: 'Never', exercise: 'Sometimes',
++    };
++    assert.strictEqual(score(student(lifestyle), student(lifestyle)), 40);
++
++    // Perfect habits agreement alone: 100 x 0.20 = 20.
++    const habits = { food: 'Vegan', smoke: 'Non-smoker', drink: 'Non-drinker', cook: 'Never' };
++    assert.strictEqual(score(student(habits), student(habits)), 20);
++  });
++
++  it('returns an integer', () => {
++    const a = student({ sleepSchedule: 'Library', food: 'Vegan', univ: 'KYU' });
++    const b = student({ sleepSchedule: 'Library', food: 'Halal', univ: 'KYU' });
++    assert.strictEqual(Number.isInteger(score(a, b)), true);
++  });
++});
++
++describe('Matching engine — ranking pipeline', () => {
++
++  it('sorts by descending score', () => {
++    const me   = student({ _id: 'me', sleepSchedule: 'Library', food: 'Vegan', univ: 'KYU' });
++    const weak = student({ _id: 'weak', sleepSchedule: 'In my room', food: 'Halal', univ: 'MUK' });
++    const mid  = student({ _id: 'mid',  sleepSchedule: 'Library',    food: 'Halal', univ: 'MUK' });
++    const best = student({ _id: 'best', sleepSchedule: 'Library',    food: 'Vegan', univ: 'KYU' });
++
++    const ranked = rankCandidates(me, [weak, best, mid]);
++    assert.deepStrictEqual(ranked.map(r => r._id), ['best', 'mid', 'weak']);
++    assert.ok(ranked[0].score >= ranked[1].score);
++    assert.ok(ranked[1].score >= ranked[2].score);
++  });
++
++  it('labels swipe status from the viewer\'s accepted and rejected lists', () => {
++    const me = student({ _id: 'me', accepted: ['a'], rejected: ['r'] });
++    const ranked = rankCandidates(me, [student({ _id: 'a' }), student({ _id: 'r' }), student({ _id: 'n' })]);
++    const status = Object.fromEntries(ranked.map(r => [r._id, r.status]));
++    assert.deepStrictEqual(status, { a: 'Accepted', r: 'Rejected', n: '-' });
++  });
++
++  it('attaches a per-category breakdown for every candidate', () => {
++    // The breakdown is what makes a score explainable during academic review;
++    // if it silently stops being emitted the swipe card loses its rationale.
++    const ranked = rankCandidates(student({ _id: 'me' }), [student({ _id: 'x' })]);
++    assert.deepStrictEqual(
++      Object.keys(ranked[0].breakdown).sort(),
++      ['academic', 'demographic', 'habits', 'hostel', 'lifestyle']
++    );
++  });
++
++  it('does not mutate the candidate objects it is given', () => {
++    const candidate = student({ _id: 'x' });
++    rankCandidates(student({ _id: 'me' }), [candidate]);
++    assert.strictEqual(candidate.score, undefined);
++    assert.strictEqual(candidate.status, undefined);
++  });
++
++  it('removes candidates that fail a dealbreaker', () => {
++    const me = student({ _id: 'me', roomieSmoke: 'Non-smoker only' });
++    const ranked = rankCandidates(me, [
++      student({ _id: 'smoker',     smoke: 'Smoker' }),
++      student({ _id: 'non-smoker', smoke: 'Non-smoker' }),
++    ]);
++    assert.deepStrictEqual(ranked.map(r => r._id), ['non-smoker']);
++  });
++});
+diff --git a/tests/route-auth.test.js b/tests/route-auth.test.js
+deleted file mode 100644
+index 94438fd..0000000
+--- a/tests/route-auth.test.js
++++ /dev/null
+@@ -1,56 +0,0 @@
+-const should = require('should');
+-const assert = require('assert');
+-const request = require('supertest');
+-const chaiHttp = require('chai-http');
+-const chai = require('chai');
+-const app = require('../server');
+-
+-// Configure chai
+-chai.use(chaiHttp);
+-var expect = chai.expect;
+-
+-// Test auth endpoints
+-describe( 'Auth Tests', () => {
+-
+-    let token;
+-    //Test POST api/auth
+-    describe('Auth user', () => {
+-        it('should auth a user', async () => {
+-            const sampleUser = {
+-                email: 'john.doe@gmail.com',
+-                password: '123456'
+-            };
+-
+-             await request(app)
+-                .post('/api/auth')
+-                .send(sampleUser)
+-                .then((res) => {
+-                    //asserion
+-                    expect(res).to.have.status(202);
+-
+-                    expect(res.body).to.have.property("token");
+-                    token = res.body.token;
+-                }).catch( err => {
+-                console.log(err.message)
+-            });
+-        })
+-    });
+-
+-    // Test GET api/auth
+-    describe('Get User after is authenticated', () => {
+-        it('should get the user', done => {
+-            //Send request to the app
+-            request(app)
+-                .get('/api/auth')
+-                .set('x-auth-token',token)
+-                .then((res) => {
+-                    //asserion
+-                    expect(res).to.have.status(200);
+-
+-                    done()
+-                }).catch( err => {
+-                console.log(err.message)
+-            })
+-        })
+-    })
+-});
+diff --git a/tests/route_profile.test.js b/tests/route_profile.test.js
+deleted file mode 100644
+index 0286d7f..0000000
+--- a/tests/route_profile.test.js
++++ /dev/null
+@@ -1,99 +0,0 @@
+-const should = require('should');
+-const assert = require('assert');
+-const request = require('supertest');
+-const chaiHttp = require('chai-http');
+-const chai = require('chai');
+-const app = require('../server');
+-
+-// Configure chai
+-chai.use(chaiHttp);
+-var expect = chai.expect;
+-
+-// Test get profile after the user is authenticated
+-describe( 'Profile Test', () => {
+-    describe('Auth user', () => {
+-        it('should auth a user', async () => {
+-            const sampleUser = {
+-                email: 'john.doe@gmail.com',
+-                password: '123456'
+-            };
+-
+-            await request(app)
+-                .post('/api/auth')
+-                .send(sampleUser)
+-                .then((res) => {
+-                    //asserion
+-                    expect(res).to.have.status(202);
+-                    expect(res.body).to.have.property("token");
+-                }).catch( err => {
+-                    console.log(err.message)
+-                });
+-        })
+-    });
+-
+-    // Test GET api/profile/me
+-    describe('Get User profile after is authenticated', () => {
+-        it('should create the user profile', async () => {
+-            //Send request to the app
+-            await request(app)
+-                .get('/api/profile/me')
+-                .then((res) => {
+-                    //asserion
+-                    expect(res).to.have.status(200);
+-                    expect(res.body).to.have.property("_id");
+-                    expect(res.body).to.have.property("user");
+-                    expect(res.body).to.have.property("user").to.have.property("_id");
+-                    expect(res.body).to.have.property("user").to.have.property("firstName");
+-                    expect(res.body).to.have.property("user").to.have.property("lastName");
+-                    expect(res.body).to.have.property("user").to.have.property("email");
+-                    expect(res.body).to.have.property("date");
+-                }).catch( err => {
+-                console.log(err.message)
+-            })
+-        })
+-    })
+-});
+-
+-
+-describe( 'Register and create profile Test', () => {
+-    // Create new user
+-    it('Should return 201 and confirmation for valid input', async () => {
+-        const sampleUser = {
+-            firstName : 'Luigi',
+-            lastName: 'Ferrari',
+-            email: 'luigi.ferrari@gmail.com',
+-            password: 'superferrari'
+-        };
+-
+-        //Send request to the app
+-        await request(app)
+-            .post('/api/users')
+-            .send(sampleUser)
+-            .then((res) => {
+-                //asserion
+-                expect(res).to.have.status(201);
+-                expect(res.body.message).to.be.equal("User created!");
+-                expect(res.body.errors.length).to.be.equal(0);
+-            }).catch( err => {
+-            console.log(err.message)
+-        })
+-    });
+-
+-    // Test POST api/profile
+-    describe('Create User Profile', () => {
+-        it('should create the user profile', async () => {
+-            //Send request to the app
+-            await request(app)
+-                .post('/api/profile')
+-                .then((res) => {
+-                    //asserion
+-                    expect(res).to.have.status(201);
+-                    expect(res.body).to.have.property("_id");
+-                    expect(res.body).to.have.property("user");
+-                    expect(res.body).to.have.property("date");
+-                }).catch( err => {
+-                    console.log(err.message)
+-                })
+-        })
+-    })
+-});
+diff --git a/tests/route_user.test.js b/tests/route_user.test.js
+deleted file mode 100644
+index 2fb2108..0000000
+--- a/tests/route_user.test.js
++++ /dev/null
+@@ -1,36 +0,0 @@
+-const should = require('should');
+-const assert = require('assert');
+-const request = require('supertest');
+-const chaiHttp = require('chai-http');
+-const chai = require('chai');
+-const app = require('../server');
+-
+-// Configure chai
+-chai.use(chaiHttp);
+-var expect = chai.expect;
+-
+-
+-describe( 'User Registration', () => {
+-    it('Should return 201 and confirmation for valid input', done => {
+-        const sampleUser = {
+-            firstName : 'Mario',
+-            lastName: 'Rossi',
+-            email: 'mario.rossi@gmail.com',
+-            password: 'supermario'
+-        };
+-
+-        //Send request to the app
+-        request(app)
+-            .post('/api/users')
+-            .send(sampleUser)
+-            .then((res) => {
+-                //asserion
+-                expect(res).to.have.status(201);
+-                expect(res.body.message).to.be.equal("User created!");
+-                expect(res.body.errors.length).to.be.equal(0);
+-                done()
+-            }).catch( err => {
+-            console.log(err.message)
+-        })
+-    })
+-});
+\ No newline at end of file

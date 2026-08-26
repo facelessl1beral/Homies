@@ -6,12 +6,74 @@ const { check, validationResult } = require('express-validator');
 const Hostel = require('../../models/Hostel');
 const User = require('../../models/User');
 const nodemailer = require('nodemailer');
+const hostelAuth = require('../../middleware/hostelAuth');
+const {
+  canConfirmBooking, canDeleteRoom, canSwitchOccupant, deriveRoomStatus,
+} = require('../../lib/booking');
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-});
+// SMTP is optional. When it is not configured we log what would have been
+// sent instead of constructing a transport with undefined credentials, which
+// fails at send time with an error that reads like a code fault rather than a
+// missing setting.
+const SMTP_CONFIGURED = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+
+const transporter = SMTP_CONFIGURED
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: Number(process.env.SMTP_PORT) === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    })
+  : null;
+
+const confirmationEmail = ({ hostel, room, recipient, roommate }) => `
+  <h2>Your Homies booking is confirmed</h2>
+  <p>Hi ${recipient.name || recipient.firstName},</p>
+  <p>Your room has been confirmed at <strong>${hostel.name}</strong>.</p>
+  <table style="border-collapse:collapse;margin:16px 0">
+    <tr><td style="padding:6px 16px 6px 0;color:#888">Room</td><td><strong>${room.roomNumber}</strong></td></tr>
+    <tr><td style="padding:6px 16px 6px 0;color:#888">Hostel</td><td><strong>${hostel.name}</strong></td></tr>
+    <tr><td style="padding:6px 16px 6px 0;color:#888">Roommate</td><td><strong>${roommate.name || roommate.firstName}</strong></td></tr>
+    <tr><td style="padding:6px 16px 6px 0;color:#888">Roommate email</td><td>${roommate.email}</td></tr>
+  </table>
+  <p>Please contact your hostel to arrange move-in details.</p>
+  <p style="color:#888;font-size:0.85rem">— The Homies Team</p>
+`;
+
+/**
+ * Notify both students. Never throws: a failed send must not roll back or
+ * obscure a booking that has already been written.
+ *
+ * Returns true only if both messages were actually accepted by the server, so
+ * the administrator can be told plainly when a booking succeeded but the
+ * notification did not — rather than assuming the students have been told.
+ */
+async function sendBookingEmails({ hostel, room, studentA, studentB }) {
+  if (!transporter) {
+    console.warn(`ℹ SMTP not configured — booking confirmed for ${studentA.email} and ${studentB.email}, no email sent`);
+    return false;
+  }
+  try {
+    await Promise.all([
+      transporter.sendMail({
+        from: `"Homies" <${process.env.SMTP_USER}>`,
+        to: studentA.email,
+        subject: `Your room is confirmed — ${hostel.name}`,
+        html: confirmationEmail({ hostel, room, recipient: studentA, roommate: studentB }),
+      }),
+      transporter.sendMail({
+        from: `"Homies" <${process.env.SMTP_USER}>`,
+        to: studentB.email,
+        subject: `Your room is confirmed — ${hostel.name}`,
+        html: confirmationEmail({ hostel, room, recipient: studentB, roommate: studentA }),
+      }),
+    ]);
+    return true;
+  } catch (err) {
+    console.warn('⚠ Booking email failed (check SMTP credentials):', err.message);
+    return false;
+  }
+}
 
 // Register hostel
 // Public — get all hostels (no auth required)
@@ -89,32 +151,30 @@ router.get('/', async (req, res) => {
 });
 
 // Get mutual matches for this hostel — admin dashboard
-router.get('/matches', async (req, res) => {
-  const token = req.header('x-auth-token');
-  if (!token) return res.status(401).json({ msg: 'No token' });
-
+router.get('/matches', hostelAuth, async (req, res) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (!decoded.hostel || decoded.hostel.role !== 'admin') return res.status(403).json({ msg: 'Forbidden' });
-
-    const hostel = await Hostel.findById(decoded.hostel.id);
+    const hostel = req.hostel;
     const students = await User.find({ preferredHostel: hostel.name });
+    const byId = new Map(students.map(s => [String(s._id), s]));
 
+    // Previously this ran a findById inside a nested loop, so a hostel with
+    // N students issued N x (accepted count) database round trips on every
+    // dashboard load. Both halves of a mutual match must already be in
+    // `students` — the query selects everyone who chose this hostel, and a
+    // pair is only shown when both did — so the map is sufficient and no
+    // further queries are needed.
+    const seen = new Set();
     const matches = [];
     for (const student of students) {
-      for (const acceptedId of student.accepted) {
-        const other = await User.findById(acceptedId);
-        if (
-          other &&
-          other.preferredHostel === hostel.name &&
-          other.accepted.includes(student._id.toString())
-        ) {
-          const alreadyAdded = matches.some(m =>
-            m.studentA._id.toString() === other._id.toString() &&
-            m.studentB._id.toString() === student._id.toString()
-          );
-          if (!alreadyAdded) matches.push({ studentA: student, studentB: other });
-        }
+      for (const acceptedId of (student.accepted || []).map(String)) {
+        const other = byId.get(acceptedId);
+        if (!other) continue;
+        if (!(other.accepted || []).map(String).includes(String(student._id))) continue;
+
+        const key = [String(student._id), acceptedId].sort().join('|');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        matches.push({ studentA: student, studentB: other });
       }
     }
     res.json(matches);
@@ -126,15 +186,30 @@ router.get('/matches', async (req, res) => {
 
 
 // Add a room to this hostel
-router.post('/rooms', async (req, res) => {
-  const token = req.header('x-auth-token');
-  if (!token) return res.status(401).json({ msg: 'No token' });
+router.post('/rooms', hostelAuth, async (req, res) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (!decoded.hostel || decoded.hostel.role !== 'admin') return res.status(403).json({ msg: 'Forbidden' });
-    const hostel = await Hostel.findById(decoded.hostel.id);
-    const { roomNumber, type, floor, bathroom, proximity, capacity } = req.body;
-    hostel.rooms.push({ roomNumber, type, floor, bathroom, proximity, capacity });
+    const hostel = req.hostel;
+    const { roomNumber, type, floor, bathroom, proximity } = req.body;
+
+    if (!roomNumber || !String(roomNumber).trim()) {
+      return res.status(400).json({ msg: 'Room number is required' });
+    }
+
+    // Capacity was taken straight from the request body, where the admin form
+    // sends it as a string from a number input. A string capacity makes every
+    // later `occupants.length >= capacity` comparison behave unpredictably,
+    // so it is coerced and bounded here rather than trusted.
+    const capacity = Math.max(1, Math.min(20, parseInt(req.body.capacity, 10) || 2));
+
+    const number = String(roomNumber).trim();
+    if (hostel.rooms.some(r => r.roomNumber.toLowerCase() === number.toLowerCase())) {
+      // Duplicate room numbers were previously allowed. Two rooms called "4B"
+      // are indistinguishable in the admin dropdown, so an administrator
+      // confirming a booking cannot tell which one they picked.
+      return res.status(400).json({ msg: `Room ${number} already exists in this hostel` });
+    }
+
+    hostel.rooms.push({ roomNumber: number, type, floor, bathroom, proximity, capacity, status: 'available' });
     await hostel.save();
     res.json(hostel.rooms);
   } catch (err) {
@@ -144,99 +219,57 @@ router.post('/rooms', async (req, res) => {
 });
 
 // Get all rooms for this hostel
-router.get('/rooms', async (req, res) => {
-  const token = req.header('x-auth-token');
-  if (!token) return res.status(401).json({ msg: 'No token' });
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const hostel = await Hostel.findById(decoded.hostel.id);
-    res.json(hostel.rooms);
-  } catch (err) {
-    res.status(500).send('Server error');
-  }
+router.get('/rooms', hostelAuth, async (req, res) => {
+  res.json(req.hostel.rooms);
 });
 
-// Confirm a match — assign students to a room
-router.post('/matches/confirm', async (req, res) => {
-  const token = req.header('x-auth-token');
-  if (!token) return res.status(401).json({ msg: 'No token' });
+// Confirm a match — assign both students to a room
+router.post('/matches/confirm', hostelAuth, async (req, res) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (!decoded.hostel || decoded.hostel.role !== 'admin') return res.status(403).json({ msg: 'Forbidden' });
-
     const { studentAId, studentBId, roomId } = req.body;
-    const hostel = await Hostel.findById(decoded.hostel.id);
-
-    // Update room status and occupants
+    const hostel = req.hostel;
     const room = hostel.rooms.id(roomId);
-    if (!room) return res.status(404).json({ msg: 'Room not found' });
-    room.status = 'pending';
-    room.occupants = [studentAId, studentBId];
+
+    const [studentA, studentB] = await Promise.all([
+      User.findById(studentAId),
+      User.findById(studentBId),
+    ]);
+
+    // All refusal conditions are decided by lib/booking.js and covered by
+    // tests/booking.test.js. Before this, the handler performed no checks at
+    // all: it assigned `room.occupants = [studentAId, studentBId]`
+    // unconditionally, so confirming into an occupied room silently evicted
+    // the pair already in it while leaving their own records still naming
+    // that room. Two pairs would hold the same room and nothing would show it.
+    const check = canConfirmBooking({ room, studentA, studentB });
+    if (!check.ok) {
+      return res.status(400).json({ msg: check.msg });
+    }
+
+    room.occupants.push(String(studentA._id), String(studentB._id));
+    room.status = deriveRoomStatus(room);
     await hostel.save();
 
-    // Update both students
-    await User.findByIdAndUpdate(studentAId, {
-      bookingStatus: 'confirmed',
-      assignedRoom: room.roomNumber,
-      assignedHostel: hostel.name
+    await Promise.all([
+      User.findByIdAndUpdate(studentAId, {
+        bookingStatus: 'confirmed', assignedRoom: room.roomNumber, assignedHostel: hostel.name,
+      }),
+      User.findByIdAndUpdate(studentBId, {
+        bookingStatus: 'confirmed', assignedRoom: room.roomNumber, assignedHostel: hostel.name,
+      }),
+    ]);
+
+    // Email is best-effort and deliberately after the booking is durable.
+    // A confirmed room that failed to send an email is a minor problem; an
+    // email announcing a booking that was never saved is a serious one.
+    const emailed = await sendBookingEmails({ hostel, room, studentA, studentB });
+
+    res.json({
+      msg: 'Booking confirmed',
+      room: room.roomNumber,
+      hostel: hostel.name,
+      emailed,
     });
-    await User.findByIdAndUpdate(studentBId, {
-      bookingStatus: 'confirmed',
-      assignedRoom: room.roomNumber,
-      assignedHostel: hostel.name
-    });
-
-    // Fetch both students for email
-    const studentA = await User.findById(studentAId);
-    const studentB = await User.findById(studentBId);
-
-
-    // Email to students — wrapped so SMTP failure doesn't block booking
-    try {
-      await transporter.sendMail({
-        from: `"Homies" <${process.env.SMTP_USER}>`,
-      to: studentA.email,
-      subject: `Your room is confirmed — ${hostel.name}`,
-      html: `
-        <h2>Your Homies booking is confirmed! 🎉</h2>
-        <p>Hi ${studentA.name || studentA.firstName},</p>
-        <p>Your room has been confirmed at <strong>${hostel.name}</strong>.</p>
-        <table style="border-collapse:collapse;margin:16px 0">
-          <tr><td style="padding:6px 16px 6px 0;color:#888">Room</td><td><strong>${room.roomNumber}</strong></td></tr>
-          <tr><td style="padding:6px 16px 6px 0;color:#888">Hostel</td><td><strong>${hostel.name}</strong></td></tr>
-          <tr><td style="padding:6px 16px 6px 0;color:#888">Roommate</td><td><strong>${studentB.name || studentB.firstName}</strong></td></tr>
-          <tr><td style="padding:6px 16px 6px 0;color:#888">Roommate email</td><td>${studentB.email}</td></tr>
-        </table>
-        <p>Please contact your hostel to arrange move-in details.</p>
-        <p style="color:#888;font-size:0.85rem">— The Homies Team</p>
-      `
-    });
-
-    // Email to Student B
-      await transporter.sendMail({
-      from: `"Homies" <${process.env.SMTP_USER}>`,
-      to: studentB.email,
-      subject: `Your room is confirmed — ${hostel.name}`,
-      html: `
-        <h2>Your Homies booking is confirmed! 🎉</h2>
-        <p>Hi ${studentB.name || studentB.firstName},</p>
-        <p>Your room has been confirmed at <strong>${hostel.name}</strong>.</p>
-        <table style="border-collapse:collapse;margin:16px 0">
-          <tr><td style="padding:6px 16px 6px 0;color:#888">Room</td><td><strong>${room.roomNumber}</strong></td></tr>
-          <tr><td style="padding:6px 16px 6px 0;color:#888">Hostel</td><td><strong>${hostel.name}</strong></td></tr>
-          <tr><td style="padding:6px 16px 6px 0;color:#888">Roommate</td><td><strong>${studentA.name || studentA.firstName}</strong></td></tr>
-          <tr><td style="padding:6px 16px 6px 0;color:#888">Roommate email</td><td>${studentA.email}</td></tr>
-        </table>
-        <p>Please contact your hostel to arrange move-in details.</p>
-        <p style="color:#888;font-size:0.85rem">— The Homies Team</p>
-      `
-    });
-
-      // Email sent successfully
-    } catch (emailErr) {
-      console.warn('⚠️  Email failed (check SMTP credentials):', emailErr.message);
-    }
-    res.json({ msg: 'Booking confirmed', room: room.roomNumber, hostel: hostel.name });
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server error');
@@ -244,13 +277,9 @@ router.post('/matches/confirm', async (req, res) => {
 });
 
 // Get occupant details for a room
-router.get('/rooms/:roomId/occupants', async (req, res) => {
-  const token = req.header('x-auth-token');
-  if (!token) return res.status(401).json({ msg: 'No token' });
+router.get('/rooms/:roomId/occupants', hostelAuth, async (req, res) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const hostel = await Hostel.findById(decoded.hostel.id);
-    const room = hostel.rooms.id(req.params.roomId);
+    const room = req.hostel.rooms.id(req.params.roomId);
     if (!room) return res.status(404).json({ msg: 'Room not found' });
     const occupants = await User.find(
       { _id: { $in: room.occupants } },
@@ -258,77 +287,86 @@ router.get('/rooms/:roomId/occupants', async (req, res) => {
     );
     res.json(occupants);
   } catch (err) {
+    console.error(err.message);
     res.status(500).send('Server error');
   }
 });
 
 // Remove a student from a room
-router.post('/rooms/remove-occupant', async (req, res) => {
-  const token = req.header('x-auth-token');
-  if (!token) return res.status(401).json({ msg: 'No token' });
+router.post('/rooms/remove-occupant', hostelAuth, async (req, res) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (!decoded.hostel || decoded.hostel.role !== 'admin') return res.status(403).json({ msg: 'Forbidden' });
     const { roomId, studentId } = req.body;
-    const hostel = await Hostel.findById(decoded.hostel.id);
+    const hostel = req.hostel;
     const room = hostel.rooms.id(roomId);
     if (!room) return res.status(404).json({ msg: 'Room not found' });
-    room.occupants = room.occupants.filter(id => id.toString() !== studentId.toString());
-    if (room.occupants.length === 0) room.status = 'available';
+
+    room.occupants = room.occupants.filter(id => String(id) !== String(studentId));
+    room.status = deriveRoomStatus(room);
     await hostel.save();
+
+    // The student's own record is reset in the same operation. If these two
+    // ever diverge, the student believes they hold a room the hostel has
+    // already given away.
     await User.findByIdAndUpdate(studentId, {
-      bookingStatus: 'none',
-      assignedRoom: '',
-      assignedHostel: ''
+      bookingStatus: 'none', assignedRoom: '', assignedHostel: ''
     });
+
     res.json({ msg: 'Student removed from room', room });
   } catch (err) {
+    console.error(err.message);
     res.status(500).send('Server error');
   }
 });
 
 // Switch a student to a different room
-router.post('/rooms/switch-occupant', async (req, res) => {
-  const token = req.header('x-auth-token');
-  if (!token) return res.status(401).json({ msg: 'No token' });
+router.post('/rooms/switch-occupant', hostelAuth, async (req, res) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (!decoded.hostel || decoded.hostel.role !== 'admin') return res.status(403).json({ msg: 'Forbidden' });
     const { studentId, fromRoomId, toRoomId } = req.body;
-    const hostel = await Hostel.findById(decoded.hostel.id);
+    const hostel = req.hostel;
     const fromRoom = hostel.rooms.id(fromRoomId);
     const toRoom = hostel.rooms.id(toRoomId);
-    if (!fromRoom || !toRoom) return res.status(404).json({ msg: 'Room not found' });
-    if (toRoom.status !== 'available') return res.status(400).json({ msg: `Room ${toRoom.roomNumber} is not available` });
-    // Remove from old room
-    fromRoom.occupants = fromRoom.occupants.filter(id => id.toString() !== studentId.toString());
-    if (fromRoom.occupants.length === 0) fromRoom.status = 'available';
-    // Add to new room
-    toRoom.occupants.push(studentId);
-    if (toRoom.occupants.length >= toRoom.capacity) toRoom.status = 'pending';
+
+    // The old check was `toRoom.status !== 'available'`, which refused any
+    // partly-filled room even when it had space, and relied on a status field
+    // that was maintained by hand. Capacity is now the authority.
+    const check = canSwitchOccupant({ fromRoom, toRoom, studentId });
+    if (!check.ok) return res.status(400).json({ msg: check.msg });
+
+    fromRoom.occupants = fromRoom.occupants.filter(id => String(id) !== String(studentId));
+    fromRoom.status = deriveRoomStatus(fromRoom);
+
+    toRoom.occupants.push(String(studentId));
+    toRoom.status = deriveRoomStatus(toRoom);
     await hostel.save();
-    // Update student
+
     await User.findByIdAndUpdate(studentId, {
-      assignedRoom: toRoom.roomNumber,
-      assignedHostel: hostel.name
+      assignedRoom: toRoom.roomNumber, assignedHostel: hostel.name
     });
-    res.json({ msg: `Student moved to Room ${toRoom.roomNumber}`, toRoom });
+
+    res.json({ msg: `Student moved to Room ${toRoom.roomNumber}`, rooms: hostel.rooms });
   } catch (err) {
+    console.error(err.message);
     res.status(500).send('Server error');
   }
 });
 
 // Delete a room
-router.delete('/rooms/:roomId', async (req, res) => {
-  const token = req.header('x-auth-token');
-  if (!token) return res.status(401).json({ msg: 'No token' });
+router.delete('/rooms/:roomId', hostelAuth, async (req, res) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const hostel = await Hostel.findById(decoded.hostel.id);
-    hostel.rooms = hostel.rooms.filter(r => r._id.toString() !== req.params.roomId);
+    const hostel = req.hostel;
+    const room = hostel.rooms.id(req.params.roomId);
+
+    // Deleting an occupied room orphaned its occupants: their records kept
+    // bookingStatus 'confirmed' and an assignedRoom naming a room that no
+    // longer existed, and no admin screen would ever show them again.
+    const check = canDeleteRoom(room);
+    if (!check.ok) return res.status(400).json({ msg: check.msg });
+
+    hostel.rooms = hostel.rooms.filter(r => String(r._id) !== String(req.params.roomId));
     await hostel.save();
     res.json(hostel.rooms);
   } catch (err) {
+    console.error(err.message);
     res.status(500).send('Server error');
   }
 });

@@ -3,6 +3,7 @@ import { Link, Redirect } from 'react-router-dom';
 import { connect } from 'react-redux';
 import PropTypes from 'prop-types';
 import { login } from '../../actions/auth';
+import PasswordField from '../layout/PasswordField';
 
 const Login = ({ login, isAuthenticated }) => {
   const [formData, setFormData] = useState({
@@ -39,18 +40,17 @@ const Login = ({ login, isAuthenticated }) => {
               name='email'
               value={email}
               onChange={e => onChange(e)}
+              autoComplete='email'
               required
           />
         </div>
         <div className='form-group'>
-          <input
-              id='password-input'
-            type='password'
-            placeholder='Password'
-            name='password'
+          <PasswordField
+            id='password-input'
             value={password}
             onChange={e => onChange(e)}
-            minLength='6'
+            autoComplete='current-password'
+            required
           />
         </div>
         <input type='submit' className='btn btn-primary' value='Login' />

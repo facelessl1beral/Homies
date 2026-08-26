@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
+import PasswordField from '../layout/PasswordField';
 import axios from 'axios';
 
 const HostelLogin = ({ onLogin }) => {
   const [tab, setTab] = useState('login');
   const [loginData, setLoginData] = useState({ name: '', password: '' });
   const [registerData, setRegisterData] = useState({ name: '', contactEmail: '', password: '', password2: '', location: '', description: '' });
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -94,16 +94,14 @@ const HostelLogin = ({ onLogin }) => {
                 onChange={e => { const v = e.target.value; setLoginData(d => ({ ...d, name: v })); }}
                 placeholder="e.g. Bavana" required />
             </div>
-            <div style={{ marginBottom: '1.5rem', position: 'relative' }}>
+            <div style={{ marginBottom: '1.5rem' }}>
               <label style={labelStyle}>Password</label>
-              <input style={inputStyle} type={showPassword ? 'text' : 'password'}
+              <PasswordField
                 value={loginData.password}
                 onChange={e => { const v = e.target.value; setLoginData(d => ({ ...d, password: v })); }}
-                required />
-              <span onClick={() => setShowPassword(!showPassword)}
-                style={{ position: 'absolute', right: '12px', bottom: '10px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                {showPassword ? 'Hide' : 'Show'}
-              </span>
+                autoComplete='current-password'
+                required
+              />
             </div>
             <button type="submit" style={{
               width: '100%', padding: '12px', border: 'none', borderRadius: '8px',
@@ -140,23 +138,24 @@ const HostelLogin = ({ onLogin }) => {
                 onChange={e => { const v = e.target.value; setRegisterData(d => ({ ...d, description: v })); }}
                 placeholder="Short description for students" />
             </div>
-            <div style={{ marginBottom: '1rem', position: 'relative' }}>
+            <div style={{ marginBottom: '1rem' }}>
               <label style={labelStyle}>Password *</label>
-              <input style={inputStyle} type={showPassword ? 'text' : 'password'}
+              <PasswordField
                 value={registerData.password}
                 onChange={e => { const v = e.target.value; setRegisterData(d => ({ ...d, password: v })); }}
-                required />
-              <span onClick={() => setShowPassword(!showPassword)}
-                style={{ position: 'absolute', right: '12px', bottom: '10px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                {showPassword ? 'Hide' : 'Show'}
-              </span>
+                autoComplete='new-password'
+                required
+              />
             </div>
             <div style={{ marginBottom: '1.5rem' }}>
               <label style={labelStyle}>Confirm Password *</label>
-              <input style={inputStyle} type={showPassword ? 'text' : 'password'}
+              <PasswordField
                 value={registerData.password2}
                 onChange={e => { const v = e.target.value; setRegisterData(d => ({ ...d, password2: v })); }}
-                required />
+                placeholder='Confirm Password'
+                autoComplete='new-password'
+                required
+              />
             </div>
             <button type="submit" style={{
               width: '100%', padding: '12px', border: 'none', borderRadius: '8px',
