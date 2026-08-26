@@ -50,14 +50,25 @@ const PasswordField = ({
       />
       <button
         type='button'
-        className='pw-field-toggle'
+        className={`pw-field-toggle${visible ? ' is-visible' : ''}`}
         onClick={() => setVisible(v => !v)}
         aria-pressed={visible}
         aria-label={visible ? 'Hide password' : 'Show password'}
         title={visible ? 'Hide password' : 'Show password'}
         tabIndex={0}
       >
-        {visible ? 'Hide' : 'Show'}
+        {/* An eye glyph is ambiguous on its own — an open eye could mean
+            "your password is visible" or "click to make it visible". The
+            slash resolves it the way every password field the user has met
+            resolves it: struck through means hidden. aria-label carries the
+            unambiguous wording for anyone who cannot see the icon. */}
+        <svg width='18' height='18' viewBox='0 0 24 24' fill='none'
+             stroke='currentColor' strokeWidth='2'
+             strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+          <path d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z' />
+          <circle cx='12' cy='12' r='3' />
+          {!visible && <line x1='3' y1='3' x2='21' y2='21' />}
+        </svg>
       </button>
     </div>
   );

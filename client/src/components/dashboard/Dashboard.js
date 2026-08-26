@@ -5,6 +5,7 @@ import { connect } from "react-redux";
 import { getCurrentProfile } from "../../actions/profile";
 import Spinner from "../layout/Spinner";
 import PaymentPanel from "./PaymentPanel";
+import BookingCard from "./BookingCard";
 
 const Dashboard = ({
   getCurrentProfile,
@@ -139,6 +140,11 @@ const Dashboard = ({
                     because there is nothing to pay for before that. The panel
                     is explicitly a prototype and takes no money — see
                     PaymentPanel.js. */}
+                {/* In-app confirmation first: it is the only channel that
+                    cannot fail silently, so it is the authoritative one.
+                    WhatsApp and email are notifications about this card, not
+                    substitutes for it. */}
+                <BookingCard myName={user && (user.name || user.firstName)} />
                 <PaymentPanel
                   hostelName={profile.assignedHostel}
                   roomNumber={profile.assignedRoom}

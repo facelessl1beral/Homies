@@ -81,7 +81,7 @@ async function sendBookingEmails({ hostel, room, studentA, studentB }) {
 router.get('/public', async (req, res) => {
   try {
     const hostels = await Hostel.find({}, { name: 1, location: 1, description: 1, rooms: 1 });
-    const result = hostels.map(h => ({ _id: h._id, name: h.name, location: h.location, description: h.description, totalRooms: h.rooms.length, availableRooms: h.rooms.filter(r => r.status === 'available').length }));
+    const result = hostels.map(h => ({ _id: h._id, name: h.name, location: h.location, description: h.description, totalRooms: h.rooms.length, availableRooms: h.rooms.filter(r => (r.occupants || []).length < (r.capacity || 0)).length }));
     res.json(result);
   } catch (err) { res.status(500).send('Server error'); }
 });
@@ -284,7 +284,7 @@ router.get('/rooms/:roomId/occupants', hostelAuth, async (req, res) => {
     if (!room) return res.status(404).json({ msg: 'Room not found' });
     const occupants = await User.find(
       { _id: { $in: room.occupants } },
-      { name: 1, firstName: 1, lastName: 1, email: 1, course: 1, sem: 1 }
+      { name: 1, firstName: 1, lastName: 1, email: 1, phone: 1, course: 1, sem: 1, paymentStatus: 1, paymentNote: 1, paymentUpdated: 1 }
     );
     res.json(occupants);
   } catch (err) {
@@ -366,6 +366,49 @@ router.delete('/rooms/:roomId', hostelAuth, async (req, res) => {
     hostel.rooms = hostel.rooms.filter(r => String(r._id) !== String(req.params.roomId));
     await hostel.save();
     res.json(hostel.rooms);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server error');
+  }
+});
+
+// Record a payment status against a student
+//
+// Deliberately a manual record, not a transaction. Homies processes no
+// payments; this stores what the hostel administrator has observed offline so
+// the dashboard reflects reality. Naming it "recorded by" rather than "paid"
+// in the UI keeps that distinction visible to whoever reads it later.
+router.post('/students/payment', hostelAuth, async (req, res) => {
+  try {
+    const { studentId, paymentStatus, paymentNote } = req.body;
+    const ALLOWED = ['unpaid', 'partial', 'paid', 'waived'];
+
+    if (!ALLOWED.includes(paymentStatus)) {
+      return res.status(400).json({ msg: `Status must be one of: ${ALLOWED.join(', ')}` });
+    }
+
+    const student = await User.findById(studentId);
+    if (!student) return res.status(404).json({ msg: 'Student not found' });
+
+    // Scoped to this hostel's own students. Without this check any hostel
+    // admin could annotate any student in the system, since the id comes
+    // from the request body.
+    if (student.assignedHostel !== req.hostel.name) {
+      return res.status(403).json({ msg: 'That student is not booked into your hostel' });
+    }
+
+    student.paymentStatus = paymentStatus;
+    student.paymentNote = (paymentNote || '').slice(0, 200);
+    student.paymentUpdated = new Date();
+    await student.save();
+
+    res.json({
+      msg: `Payment recorded as ${paymentStatus}`,
+      studentId: student._id,
+      paymentStatus: student.paymentStatus,
+      paymentNote: student.paymentNote,
+      paymentUpdated: student.paymentUpdated,
+    });
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server error');

@@ -74,6 +74,7 @@ app.use('/api/hostels', require('./routes/api/hostels'));
 app.use('/api/upload', require('./routes/api/upload'));
 
 const path = require('path');
+const fs = require('fs');
 
 /**
  * Uploaded avatars.
@@ -109,10 +110,56 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static('client/build'));
-  app.get('*', (req, res) => {
-    res.sendFile(path.resolve(__dirname, 'client', 'build', 'index.html'));
+/**
+ * Serving the frontend.
+ *
+ * This server can run in two shapes and must behave sensibly in both.
+ *
+ *   Combined — client/build exists next to the API, one origin serves both.
+ *              Used when running a production build locally.
+ *
+ *   API only — the frontend is deployed separately (Cloudflare Pages,
+ *              Vercel) and this process serves nothing but /api.
+ *
+ * The previous version assumed the first shape whenever NODE_ENV was
+ * production. On a host that only runs `node server.js` — which is exactly
+ * what Render does — client/build is never created, so express.static matched
+ * nothing and the catch-all called sendFile on a file that does not exist.
+ * The result was ENOENT and a 500 on the root URL and on every mistyped API
+ * path, which reads as a broken deployment rather than a correctly configured
+ * API-only one.
+ *
+ * Checking for the build once at startup, rather than assuming, means the
+ * same server.js is correct in both deployments with no environment flag to
+ * remember.
+ */
+const BUILD_DIR = path.resolve(__dirname, 'client', 'build');
+const HAS_BUILD = fs.existsSync(path.join(BUILD_DIR, 'index.html'));
+
+if (HAS_BUILD) {
+  app.use(express.static(BUILD_DIR));
+  app.get('*', (req, res) => res.sendFile(path.join(BUILD_DIR, 'index.html')));
+  console.log('📦 Serving frontend from client/build');
+} else {
+  console.log('🔌 API-only mode — no client/build found. Frontend is deployed separately.');
+
+  // A human landing on the API root should be told what this is and where the
+  // app lives, not handed a stack trace.
+  app.get('/', (req, res) => {
+    res.json({
+      service: 'Homies API',
+      status: 'running',
+      mode: 'api-only',
+      docs: '/api/health',
+      frontend: process.env.FRONTEND_URL || 'deployed separately',
+    });
+  });
+
+  // Anything unmatched is a genuine 404, in JSON, because every client of
+  // this server speaks JSON. Falling through to Express's HTML error page
+  // would give an API consumer an unparseable body.
+  app.use((req, res) => {
+    res.status(404).json({ msg: `Not found: ${req.method} ${req.originalUrl}` });
   });
 }
 

@@ -14,7 +14,8 @@ Two front ends, one API, one database. All on free tiers.
 | `JWT_SECRET` | yes | Long random string. Changing it logs everyone out |
 | `NODE_ENV` | yes | `production` |
 | `CORS_ORIGINS` | yes in production | Comma-separated frontend origins, no trailing slash |
-| `SMTP_HOST/PORT/USER/PASS` | optional | Gmail needs an **App Password** |
+| `SMTP_HOST/PORT/USER/PASS` | optional | Gmail needs an **App Password**. Booking still works without them |
+| `FRONTEND_URL` | optional | Shown at the API root so a visitor knows where the app lives |
 
 Leaving `CORS_ORIGINS` blank allows any origin. Acceptable locally; set it in
 production.
@@ -34,6 +35,13 @@ Read at **build time**, not runtime. Changing it requires a rebuild.
 - Build: `npm install`
 - Start: `node server.js`
 - Node version comes from `.node-version`
+
+The API runs in **API-only mode** when `client/build` is absent, which is the
+normal state on Render — Render runs `node server.js` and never builds the
+client. The root URL then returns a small JSON identifying the service, and
+unmatched paths return a JSON 404. Previously it assumed a build existed and
+returned a 500 on the root URL, which reads as a broken deployment rather than
+a correctly configured one.
 
 Health check: `GET /api/health` returns environment and database state. Use it
 to confirm which backend you reached, and to wake a sleeping instance before a

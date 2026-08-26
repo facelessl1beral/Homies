@@ -11,10 +11,11 @@
     "test": "mocha tests/*.test.js --exit",
     "heroku-postbuild": "NPM_CONFIG_PRODUCTION=false npm install --prefix client && npm run build --prefix client",
     "test:watch": "mocha tests/*.test.js --watch",
-    "doctor": "node scripts/doctor.js"
+    "doctor": "node scripts/doctor.js",
+    "check:email": "node scripts/check-email.js"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.0.0 <23"
   },
   "keywords": [],
   "author": "",

@@ -19,8 +19,12 @@ const Routes = () => {
       <Switch>
         <Route exact path='/register' component={Register} />
         <Route exact path='/login' component={Login} />
-        <Route exact path="/profiles" component={Profiles} />
-        <Route exact path="/profile/:id" component={Profile} />
+        {/* Browsing other students requires an account. These were plain
+            Routes, so a logged-out visitor could reach them directly — and
+            the API behind them was public too, so the pages actually
+            rendered. Both halves are now closed. */}
+        <PrivateRoute exact path="/profiles" component={Profiles} />
+        <PrivateRoute exact path="/profile/:id" component={Profile} />
         <PrivateRoute exact path='/dashboard' component={Dashboard} />
         <PrivateRoute exact path='/recommendations' component={Recommended} />
         <PrivateRoute exact path="/edit-profile" component={EditProfile} />

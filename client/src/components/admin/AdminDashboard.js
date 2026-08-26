@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import axios from 'axios';
+import { whatsappLink, bookingMessage, isMessageable, formatPhone } from '../../utils/whatsapp';
 
-const AdminDashboard = ({ token }) => {
+const AdminDashboard = ({ token, hostelName }) => {
   const [tab, setTab] = useState('matches');
   const [matches, setMatches] = useState([]);
   const [rooms, setRooms] = useState([]);
@@ -10,6 +11,33 @@ const AdminDashboard = ({ token }) => {
   const [roomForm, setRoomForm] = useState({ roomNumber: '', type: '', floor: '', bathroom: '', proximity: '', capacity: 2 });
   const [formError, setFormError] = useState('');
   const [notice, setNotice] = useState('');
+  const [payingId, setPayingId] = useState(null);
+
+  const PAYMENT_STATES = ['unpaid', 'partial', 'paid', 'waived'];
+  const paymentColor = p =>
+    p === 'paid'    ? 'var(--success)'
+    : p === 'partial' ? 'var(--warning)'
+    : p === 'waived'  ? 'var(--accent-purple)'
+    : 'var(--text-muted)';
+
+  // Records what the hostel observed offline. Homies moves no money — the
+  // wording in this panel says "recorded", never "charged", so nobody reading
+  // the dashboard later mistakes it for a transaction log.
+  const handlePayment = async (studentId, paymentStatus, roomId) => {
+    setPayingId(studentId);
+    try {
+      await axios.post('/api/hostels/students/payment',
+        { studentId, paymentStatus }, { headers });
+      const res = await axios.get(`/api/hostels/rooms/${roomId}/occupants`, { headers });
+      setOccupantDetails(d => ({ ...d, [roomId]: res.data }));
+      setNotice(`Payment recorded as ${paymentStatus}`);
+      setError('');
+    } catch (err) {
+      setError(err.response?.data?.msg || 'Could not record payment');
+    } finally {
+      setPayingId(null);
+    }
+  };
   const [batchCount, setBatchCount] = useState(1);
   const [confirming, setConfirming] = useState(null);
   const [expandedRoom, setExpandedRoom] = useState(null);
@@ -333,8 +361,65 @@ const AdminDashboard = ({ token }) => {
                                   <div>
                                     <p style={{ fontSize: '0.85rem', color: 'var(--text-primary)', margin: 0, fontWeight: 600 }}>👤 {occ.name || occ.firstName}</p>
                                     <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '2px 0 0' }}>{occ.email} · {occ.course} {occ.sem}</p>
+                                    <p style={{ fontSize: '0.75rem', color: isMessageable(occ.phone) ? 'var(--text-secondary)' : 'var(--text-muted)', margin: '2px 0 0' }}>
+                                      {isMessageable(occ.phone)
+                                        ? formatPhone(occ.phone)
+                                        : 'No WhatsApp number on file — ask them to add one in Edit Profile'}
+                                    </p>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
+                                      <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Payment</span>
+                                      {PAYMENT_STATES.map(state => {
+                                        const active = (occ.paymentStatus || 'unpaid') === state;
+                                        return (
+                                          <button
+                                            key={state}
+                                            disabled={payingId === occ._id}
+                                            onClick={e => { e.stopPropagation(); handlePayment(occ._id, state, room._id); }}
+                                            title={`Record as ${state}`}
+                                            style={{
+                                              fontSize: '0.68rem', padding: '2px 9px', borderRadius: 'var(--radius-full)',
+                                              border: `1px solid ${active ? paymentColor(state) : 'var(--border)'}`,
+                                              background: active ? paymentColor(state) : 'transparent',
+                                              color: active ? '#fff' : 'var(--text-muted)',
+                                              fontWeight: active ? 600 : 400,
+                                              cursor: payingId === occ._id ? 'wait' : 'pointer',
+                                              textTransform: 'capitalize',
+                                              transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                                            }}
+                                          >{state}</button>
+                                        );
+                                      })}
+                                    </div>
+                                    {occ.paymentUpdated && (
+                                      <p style={{ fontSize: '0.66rem', color: 'var(--text-muted)', margin: '4px 0 0', fontStyle: 'italic' }}>
+                                        Recorded {new Date(occ.paymentUpdated).toLocaleDateString()} · manual entry, not a gateway record
+                                      </p>
+                                    )}
                                   </div>
                                   <div style={{ display: 'flex', gap: '4px', flexShrink: 0, marginLeft: '8px' }}>
+                                    {(() => {
+                                      // The other occupant, so the message can name the roommate —
+                                      // the single fact a student most wants from this notification.
+                                      const others = (occupantDetails[room._id] || []).filter(o => o._id !== occ._id);
+                                      const mate = others[0];
+                                      const link = whatsappLink(occ.phone, bookingMessage({
+                                        studentName: occ.name || occ.firstName,
+                                        hostelName: hostelName || 'your hostel',
+                                        roomNumber: room.roomNumber,
+                                        roommateName: mate ? (mate.name || mate.firstName) : '',
+                                        roommatePhone: mate ? mate.phone : '',
+                                      }));
+                                      // No usable number means no button. An action that silently
+                                      // does nothing is worse than an absent one.
+                                      if (!link) return null;
+                                      return (
+                                        <a href={link} target='_blank' rel='noopener noreferrer'
+                                          onClick={e => e.stopPropagation()}
+                                          title={`Message ${formatPhone(occ.phone)} on WhatsApp`}
+                                          style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: 'var(--radius-full)', border: '1px solid #25D366', background: 'transparent', color: '#25D366', cursor: 'pointer', textDecoration: 'none', whiteSpace: 'nowrap' }}
+                                        >WhatsApp</a>
+                                      );
+                                    })()}
                                     <button onClick={e => { e.stopPropagation(); handleSwitchOccupant(occ._id, occ.name || occ.firstName, room._id); }} style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: 'var(--radius-full)', border: '1px solid var(--accent-purple)', background: 'transparent', color: 'var(--accent-purple)', cursor: 'pointer' }}>⇄ Switch</button>
                                     <button onClick={e => { e.stopPropagation(); handleRemoveOccupant(room._id, occ._id, occ.name || occ.firstName); }} style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: 'var(--radius-full)', border: '1px solid #dc2626', background: 'transparent', color: '#dc2626', cursor: 'pointer' }}>✕ Remove</button>
                                   </div>

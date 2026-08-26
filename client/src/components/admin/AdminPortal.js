@@ -27,7 +27,7 @@ const AdminPortal = () => {
           <span style={{ fontWeight: 600, fontSize: '1rem' }}>{hostelName || 'Hostel'} Admin</span>
           <button onClick={handleLogout} style={{ marginLeft: 'auto', border: '1px solid var(--border)', borderRadius: '8px', padding: '6px 16px', cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-primary)', background: 'var(--bg-secondary)' }}>Logout</button>
         </div>
-        <AdminDashboard token={token} />
+        <AdminDashboard token={token} hostelName={hostelName} />
       </div>
     )
     : (

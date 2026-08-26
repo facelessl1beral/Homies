@@ -85,6 +85,13 @@ const PaymentPanel = ({ amount = 150000, currency = 'UGX', hostelName, roomNumbe
         background: active ? 'var(--accent-gradient)' : 'var(--bg-secondary)',
         color: active ? '#fff' : 'var(--text-primary)',
         fontSize: '0.88rem', fontWeight: active ? 600 : 400, marginRight: '8px',
+        // A selected provider gets a lift and a glow. The panel takes no money,
+        // but the controls should still respond like real controls — an
+        // interface that feels inert reads as broken, and a reviewer cannot
+        // tell "deliberately not wired up" from "does not work".
+        boxShadow: active ? '0 4px 16px rgba(124,58,237,0.38)' : 'none',
+        transform: active ? 'translateY(-1px)' : 'none',
+        transition: 'box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease',
       }}
     >
       {children}
@@ -181,6 +188,7 @@ const PaymentPanel = ({ amount = 150000, currency = 'UGX', hostelName, roomNumbe
           fontWeight: 700, fontSize: '0.95rem',
           cursor: canPreview ? 'pointer' : 'not-allowed',
         }}
+        className={canPreview ? 'pay-cta pay-cta--ready' : 'pay-cta'}
       >
         Preview payment request
       </button>

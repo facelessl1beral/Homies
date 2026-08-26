@@ -12,6 +12,7 @@ const STEPS = [
     fields: [
       { name: 'displayName', label: 'Full name', type: 'text', placeholder: 'Your full name' },
       { name: 'city', label: 'City', type: 'text', placeholder: 'Where are you based?' },
+      { name: 'phone', label: 'Phone (WhatsApp)', type: 'text', placeholder: '0701 234 567 — optional' },
       { name: 'country', label: 'Country', type: 'text', placeholder: 'Your country' },
       { name: 'linkedin', label: 'LinkedIn (optional)', type: 'text', placeholder: 'https://linkedin.com/in/...' },
       { name: 'notes', label: 'Bio (optional)', type: 'textarea', placeholder: 'Tell potential roommates something about yourself...' },
@@ -192,7 +193,7 @@ const EditProfile = ({
   const [uploadError, setUploadError] = useState('');
   const [formData, setFormData] = useState({
     displayName: '', gender: '', age: '', city: '', country: '',
-    univ: '', sem: '', course: '', food: '', smoke: '', drink: '',
+    univ: '', sem: '', course: '', phone: '', food: '', smoke: '', drink: '',
     cook: '', notes: '', linkedin: '', avatar: '',
     sleepSchedule: '', studyPref: '', cleanliness: '', social: '',
     noise: '', guests: '', exercise: '',
@@ -210,6 +211,7 @@ const EditProfile = ({
         gender: profile.gender || '',
         age: profile.age || '',
         city: profile.city || '',
+        phone: profile.phone || '',
         country: profile.country || '',
         univ: profile.univ || '',
         sem: profile.sem || '',

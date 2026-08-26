@@ -5,15 +5,24 @@ const { check, validationResult } = require('express-validator');
 const User = require('../../models/User');
 const Hostel = require('../../models/Hostel');
 const { rankCandidates } = require('../../lib/matching');
+const { publicProjection, toPublicProfile, toPublicProfiles } = require('../../lib/profileVisibility');
 const { requireIds, asObjectId } = require('../../lib/validate');
 
 // @route   GET /api/profile
-// @desc    Get all profiles (dev only)
-router.get('/', async (req, res) => {
+// @desc    Get all student profiles
+// @access  Private
+//
+// This was public, and returned User.find().select('-password') — every field
+// except the password, for every student, to anyone who could reach the API.
+// That included email addresses, complete swipe histories, and room
+// assignments. It now requires a token and returns only the allowlist in
+// lib/profileVisibility.js.
+router.get('/', auth, async (req, res) => {
   try {
-    const users = await User.find().select('-password');
-    res.json(users);
+    const users = await User.find().select(publicProjection());
+    res.json(toPublicProfiles(users));
   } catch (err) {
+    console.error(err.message);
     res.status(500).send('Server error');
   }
 });
@@ -78,7 +87,7 @@ router.get('/recommended', auth, async (req, res) => {
 router.post('/', auth, async (req, res) => {
   try {
     const fields = [
-      'name','gender','age','city','country','univ','sem','course',
+      'name','gender','age','city','country','phone','univ','sem','course',
       'sleepSchedule','cleanliness','studyPref','social','noise','guests','exercise',
       'food','smoke','drink','cook','notes','linkedin',
       'roomieGender','roomieAge','roomieCountry','roomieUniv',
@@ -126,6 +135,62 @@ router.post('/reject', auth, requireIds('id'), async (req, res) => {
   }
 });
 
+// @route   GET /api/profile/booking
+// @desc    The confirmed booking for the logged-in student, with roommate details
+// @access  Private
+//
+// The one place a student's contact details are released to another student,
+// and only to the person they are actually sharing a room with. Everywhere
+// else `phone` and `email` are withheld by lib/profileVisibility.js.
+//
+// This is what makes the in-app confirmation the primary channel: it needs no
+// credentials, no provider and no delivery, so it cannot silently fail the
+// way an email can.
+router.get('/booking', auth, async (req, res) => {
+  try {
+    const me = await User.findById(req.user.id)
+      .select('bookingStatus assignedRoom assignedHostel paymentStatus');
+
+    if (!me || me.bookingStatus !== 'confirmed' || !me.assignedRoom) {
+      return res.json({ confirmed: false });
+    }
+
+    const Hostel = require('../../models/Hostel');
+    const hostel = await Hostel.findOne({ name: me.assignedHostel });
+    const room = hostel && hostel.rooms.find(r => r.roomNumber === me.assignedRoom);
+
+    let roommate = null;
+    if (room) {
+      const otherId = (room.occupants || []).map(String).find(id => id !== String(req.user.id));
+      if (otherId) {
+        const other = await User.findById(otherId).select('name firstName lastName phone email avatar');
+        if (other) {
+          roommate = {
+            _id: other._id,
+            name: other.name || `${other.firstName || ''} ${other.lastName || ''}`.trim(),
+            phone: other.phone || '',
+            email: other.email || '',
+            avatar: other.avatar || '',
+          };
+        }
+      }
+    }
+
+    res.json({
+      confirmed: true,
+      hostel: me.assignedHostel,
+      room: me.assignedRoom,
+      paymentStatus: me.paymentStatus || 'unpaid',
+      hostelLocation: hostel ? hostel.location : '',
+      hostelPhone: hostel ? (hostel.phone || '') : '',
+      roommate,
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server error');
+  }
+});
+
 // @route   POST /api/profile/accept
 // @desc    Accept a user, and report whether that created a mutual match
 // @access  Private
@@ -167,20 +232,18 @@ router.post('/accept', auth, requireIds('id'), async (req, res) => {
 });
 
 // @route   GET /api/profile/user/:user_id
-// @desc    Get profile by user ID
-// @access  Public
-router.get('/user/:user_id', async (req, res) => {
+// @desc    Get one student profile by id
+// @access  Private
+router.get('/user/:user_id', auth, async (req, res) => {
   try {
-    // A malformed id makes findById throw a CastError that the catch block
-    // reports as a 500. Checking the shape first returns an honest 400.
-    if (!asObjectId(req.params.user_id)) {
-      return res.status(400).json({ msg: 'Invalid profile id' });
-    }
-    const user = await User.findById(req.params.user_id).select('-password');
+    const user = await User.findById(req.params.user_id).select(publicProjection());
     if (!user) return res.status(400).json({ msg: 'Profile not found' });
-    res.json(user);
+    res.json(toPublicProfile(user));
   } catch (err) {
     console.error(err.message);
+    if (err.kind === 'ObjectId') {
+      return res.status(400).json({ msg: 'Profile not found' });
+    }
     res.status(500).send('Server error');
   }
 });

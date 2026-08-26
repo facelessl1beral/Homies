@@ -86,8 +86,23 @@ function checkEnv() {
   }
 
   const missingMail = Object.keys(optional).filter(k => !process.env[k]);
-  if (missingMail.length === 0) ok('SMTP credentials are set');
-  else {
+  // Checking only that the keys exist reported "SMTP credentials are set" for
+  // a .env still containing the literal example values, which is exactly the
+  // false confidence this tool exists to prevent. Placeholders are now
+  // detected and reported as unconfigured.
+  const PLACEHOLDERS = [/your_?gmail/i, /change_?me/i, /^example/i, /your@/i, /^xxx/i];
+  const placeholder = Object.keys(optional).filter(
+    k => process.env[k] && PLACEHOLDERS.some(re => re.test(process.env[k]))
+  );
+
+  if (placeholder.length) {
+    warn(`SMTP is using placeholder values (${placeholder.join(', ')})`);
+    note('These came from .env.example and will be rejected by the mail server.');
+    note('Email is optional — nothing else depends on it. See docs/STATUS.md.');
+  } else if (missingMail.length === 0) {
+    ok('SMTP credentials are set');
+    note('Run `npm run check:email -- you@example.com` to confirm they actually work.');
+  } else {
     warn(`SMTP not fully configured (missing: ${missingMail.join(', ')})`);
     note('Booking confirmation emails will be skipped. Everything else works.');
   }
@@ -188,6 +203,19 @@ async function checkDatabase() {
   else {
     const rooms = hostels.reduce((n, h) => n + (h.rooms ? h.rooms.length : 0), 0);
     ok(`${hostels.length} hostel(s), ${rooms} room(s) total`);
+  }
+
+  const { isMessageable } = require('../lib/whatsapp');
+  const messageable = users.filter(u => isMessageable(u.phone));
+  if (users.length) {
+    if (messageable.length === 0) {
+      warn('No student has a usable WhatsApp number — the admin message button will never appear');
+      note('Students add one in Edit Profile. It is optional, but it is the notification channel.');
+    } else if (messageable.length < users.length) {
+      warn(`${messageable.length} of ${users.length} students have a usable WhatsApp number`);
+    } else {
+      ok('Every student has a usable WhatsApp number');
+    }
   }
 
   const withProfile = users.filter(u => u.sleepSchedule || u.cleanliness || u.food);

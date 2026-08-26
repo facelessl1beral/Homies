@@ -2304,29 +2304,35 @@ html, body {
 }
 .pw-field-input {
   width: 100%;
-  padding-right: 4.25rem !important;
+  padding-right: 3rem !important;
 }
 .pw-field-toggle {
   position: absolute;
-  right: 8px;
+  right: 6px;
   top: 50%;
   transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 36px square. Below about 44px a control is awkward to hit with a thumb,
+     and this one sits inside an input where a mis-tap places the caret
+     instead — annoying rather than harmful, but avoidable. */
+  width: 36px;
+  height: 36px;
   background: transparent;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--radius-full);
   color: var(--text-muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  padding: 3px 10px;
   cursor: pointer;
-  line-height: 1.4;
-  transition: color 0.15s, border-color 0.15s;
+  padding: 0;
+  transition: color 0.18s ease, background 0.18s ease;
 }
-.pw-field-toggle:hover,
-.pw-field-toggle:focus-visible {
+.pw-field-toggle:hover {
   color: var(--accent-purple);
-  border-color: var(--accent-purple);
+  background: rgba(124, 58, 237, 0.10);
+}
+.pw-field-toggle.is-visible {
+  color: var(--accent-purple);
 }
 /* Visible focus ring: the toggle is keyboard reachable, so it must be
    keyboard visible. */
@@ -2348,3 +2354,38 @@ html, body {
 }
 .form-hint--ok   { color: var(--success, #10b981); }
 .form-hint--warn { color: var(--warning, #f59e0b); }
+
+/* ── Payment call to action ───────────────────────────────────────────────
+   The payment panel is a prototype and moves no money, but its controls
+   still behave like controls. An interface that feels inert reads as broken,
+   and a reviewer cannot distinguish "deliberately not wired up" from "does
+   not work" — so the affordances are real even though the transaction is not.
+   The panel says so in words; the styling does not need to also look dead. */
+.pay-cta {
+  transition: box-shadow 0.25s ease, transform 0.15s ease, filter 0.2s ease;
+}
+.pay-cta--ready {
+  box-shadow: 0 4px 20px rgba(124, 58, 237, 0.42);
+  animation: pay-pulse 2.4s ease-in-out infinite;
+}
+.pay-cta--ready:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.08);
+  box-shadow: 0 8px 28px rgba(124, 58, 237, 0.55);
+}
+.pay-cta--ready:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 10px rgba(124, 58, 237, 0.45);
+}
+
+@keyframes pay-pulse {
+  0%, 100% { box-shadow: 0 4px 20px rgba(124, 58, 237, 0.42); }
+  50%      { box-shadow: 0 4px 26px rgba(124, 58, 237, 0.62); }
+}
+
+/* Respect a stated preference for reduced motion. A pulsing control is
+   exactly the kind of thing this setting exists to stop. */
+@media (prefers-reduced-motion: reduce) {
+  .pay-cta--ready { animation: none; }
+  .pay-cta--ready:hover { transform: none; }
+}

@@ -80,9 +80,11 @@ Terminal 2 — Frontend:
 
 ### Verifying
 
-    npm test                        # 59 unit tests
+    npm test                        # 73 unit tests
     npm run doctor                  # environment + data diagnostic
     npm run build --prefix client   # production build
+
+    npm run check:email -- you@example.com   # verify SMTP end to end
 
 `npm run doctor` is the fastest way to find out whether anything is wrong. It
 reports which backend the frontend will reach, what is in the database, and —
@@ -116,6 +118,7 @@ Result rounded to nearest integer. Verified by hand calculation against live dat
 | [docs/TESTING.md](docs/TESTING.md) | Test framework, tiers, manual checklist, the doctor |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Environment variables, Render, Cloudflare Pages, Vercel |
 | [docs/PAYMENTS.md](docs/PAYMENTS.md) | Mobile money prototype and what integration needs |
+| [docs/MOCHA-EXPLAINED.md](docs/MOCHA-EXPLAINED.md) | How the tests work, written to be read cold |
 
 ## Known Constraints
 

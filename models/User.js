@@ -18,6 +18,11 @@ const UserSchema = new mongoose.Schema({
   gender:     { type: String, default: '' },
   age:        { type: String, default: '' },
   city:       { type: String, default: '' },
+  // Optional. Powers the administrator's WhatsApp click-to-chat link. Never
+  // required: the accounts already in the database predate this field, and
+  // making it mandatory would mean editing every one of them before the
+  // booking flow worked. The button is simply absent without a number.
+  phone:      { type: String, default: '' },
   country:    { type: String, default: '' },
   univ:       { type: String, default: '' },
   sem:        { type: String, default: '' },
@@ -63,6 +68,13 @@ const UserSchema = new mongoose.Schema({
   proximityPref:   { type: String, default: '' },
   // Booking status
   bookingStatus:  { type: String, default: 'none' },
+  // Recorded by a hostel administrator, not by a payment gateway. Homies takes
+  // no money: this is a manual note of what the hostel has observed offline,
+  // so that the admin dashboard reflects reality rather than pretending to be
+  // a ledger. See docs/PAYMENTS.md.
+  paymentStatus:  { type: String, default: 'unpaid' },
+  paymentNote:    { type: String, default: '' },
+  paymentUpdated: { type: Date },
   assignedRoom:   { type: String, default: '' },
   assignedHostel: { type: String, default: '' },
   // Matching system
