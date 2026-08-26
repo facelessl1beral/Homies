@@ -1,0 +1,18 @@
+{
+  "short_name": "Homies",
+  "name": "Homies — Find Your Roommate",
+  "description": "Weighted compatibility matching for KYU students. Find your perfect hostel roommate.",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#7c3aed",
+  "background_color": "#0a0a0f",
+  "orientation": "portrait-primary"
+}
