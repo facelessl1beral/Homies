@@ -7,3 +7,5 @@ client/public/uploads/*
 
 # Patch files — delivery artefacts, never committed
 *.patch
+
+*.patch
