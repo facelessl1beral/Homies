@@ -97,6 +97,14 @@ const BookingCard = ({ myName }) => {
         <span style={{ fontWeight: 400, opacity: 0.75 }}> · recorded by {hostel}</span>
       </div>
 
+      {/* Says plainly who holds the money and who does not. The status above
+          is a note made by hostel staff, not a transaction record — without
+          this line a student could reasonably read "Payment recorded" as
+          confirmation that Homies took a payment. It did not. */}
+      <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '8px 0 0' }}>
+        Recorded by hostel staff. Homies processes no payments — fees are arranged directly with {hostel}.
+      </p>
+
       {roommate && (
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
           <p style={{ ...label, marginBottom: '8px' }}>Your roommate</p>
@@ -133,6 +141,15 @@ const BookingCard = ({ myName }) => {
               They have not added a WhatsApp number yet — you can email them instead.
             </p>
           )}
+
+          {/* States the rule that lib/profileVisibility.js enforces, to the
+              person it protects. Contact details are withheld from the
+              Discover feed and every profile listing, and released only here,
+              only to the two people sharing the room. A privacy guarantee the
+              user never learns about does not reassure anyone. */}
+          <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '10px 0 0', fontStyle: 'italic' }}>
+            Contact details are released only to the person you share a room with.
+          </p>
         </div>
       )}
     </div>

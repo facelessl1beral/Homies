@@ -164,6 +164,36 @@ const AdminDashboard = ({ token, hostelName }) => {
   };
 
   const availableRooms = rooms.filter(r => (r.occupants || []).length + 2 <= r.capacity);
+
+  // Occupancy summary, derived from `rooms` — no extra request.
+  //
+  // Counted in BEDS rather than rooms. A hostel manager's question is "how
+  // many students can I still place", and a list of rooms does not answer it:
+  // a half-full double and an empty single both read as "one room" while
+  // representing different amounts of space.
+  //
+  // There is deliberately no "unpaid" figure here. Payment status lives in
+  // `occupantDetails`, which is only fetched when a room is expanded, so any
+  // total would be wrong until every room had been opened. A number that is
+  // usually wrong is worse than no number, because the reader cannot tell
+  // which case they are looking at.
+  const totalBeds = rooms.reduce((n, r) => n + (r.capacity || 0), 0);
+  const bedsFilled = rooms.reduce((n, r) => n + (r.occupants || []).length, 0);
+  const bedsFree = totalBeds - bedsFilled;
+
+  const stat = (value, label, tone) => (
+    <div style={{ flex: '1 1 0', minWidth: '110px', padding: '14px 16px', borderRight: '1px solid var(--border)' }}>
+      <div style={{ fontSize: '1.9rem', fontWeight: 800, lineHeight: 1.1, color: tone || 'var(--text-primary)' }}>{value}</div>
+      <div style={{ fontSize: '0.68rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: '2px' }}>{label}</div>
+    </div>
+  );
+
+  const legendKey = (color, label) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginRight: '14px', fontSize: '0.7rem', letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+      <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: color, display: 'inline-block' }} />
+      {label}
+    </span>
+  );
   // Room status is now derived from occupancy on the server
   // (available | partial | full). 'pending' is retained so rooms written by
   // the previous version still render with a sensible colour rather than
@@ -189,6 +219,17 @@ const AdminDashboard = ({ token, hostelName }) => {
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto', padding: '1rem' }}>
       <h2 style={{ color: 'var(--text-primary)', marginBottom: '0.25rem' }}>Hostel Dashboard</h2>
+
+      {/* At-a-glance figures. Additive: nothing below depends on this block,
+          so it cannot affect the rest of the dashboard if it renders oddly. */}
+      {rooms.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-card)', marginTop: '14px', overflow: 'hidden' }}>
+          {stat(matches.length, 'Pending pairs', matches.length > 0 ? 'var(--accent-purple)' : undefined)}
+          {stat(bedsFilled, 'Beds filled')}
+          {stat(bedsFree, 'Beds free', bedsFree === 0 ? 'var(--danger)' : 'var(--success)')}
+          {stat(rooms.length, 'Rooms')}
+        </div>
+      )}
       {error && <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: 'var(--danger)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', margin: '1rem 0' }}>{error}</div>}
       {notice && <div style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', margin: '1rem 0' }}>{notice}</div>}
 
@@ -311,6 +352,22 @@ const AdminDashboard = ({ token, hostelName }) => {
               Add Room
             </button>
           </div>
+
+          {/* Legend and bed count. The colours were already being used on the
+              room cards; nothing said what they meant, so an administrator had
+              to infer it. Naming them costs one line and removes the guess. */}
+          {rooms.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '10px', margin: '0 0 14px' }}>
+              <div>
+                {legendKey('var(--success)', 'Empty')}
+                {legendKey('var(--warning)', 'Part filled')}
+                {legendKey('var(--danger)', 'Full')}
+              </div>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                {bedsFilled} of {totalBeds} beds filled
+              </span>
+            </div>
+          )}
 
           {rooms.length === 0
             ? <p style={{ color: 'var(--text-muted)' }}>No rooms added yet.</p>
