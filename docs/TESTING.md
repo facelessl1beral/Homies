@@ -11,7 +11,8 @@ Three commands. All three must pass before any change is described as done.
 
 | Command | Proves | Runtime |
 |---|---|---|
-| `npm test` | Business logic is correct | ~1s |
+| `npm test` | Backend logic is correct (105 unit tests) | ~1s |
+| `npm test --prefix client` | React components behave (35 tests) | ~4s |
 | `npm run build --prefix client` | The frontend compiles and deploys | ~40s |
 | `npm run doctor` | The environment and data are usable | ~3s |
 
@@ -20,6 +21,10 @@ deployability. The doctor gates *situation* — it answers questions about the
 running system that the other two cannot.
 
 ---
+
+> For the standard unit / integration / end-to-end breakdown, and an explicit
+> account of the two categories this project does **not** have, see
+> [TEST-TAXONOMY.md](TEST-TAXONOMY.md).
 
 ## 2. The framework, and why this one
 

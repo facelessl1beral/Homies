@@ -24,7 +24,9 @@
     "start": "NODE_OPTIONS=--openssl-legacy-provider react-scripts start",
     "build": "CI=false NODE_OPTIONS=--openssl-legacy-provider react-scripts build",
     "eject": "react-scripts eject",
-    "build:strict": "CI=true react-scripts build"
+    "build:strict": "CI=true NODE_OPTIONS=--openssl-legacy-provider react-scripts build",
+    "test": "NODE_OPTIONS=--openssl-legacy-provider react-scripts test --watchAll=false",
+    "test:watch": "NODE_OPTIONS=--openssl-legacy-provider react-scripts test"
   },
   "eslintConfig": {
     "extends": "react-app",
@@ -45,6 +47,9 @@
     ]
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^4.2.4",
+    "@testing-library/react": "^9.5.0",
+    "@testing-library/user-event": "^7.2.1",
     "redux-mock-store": "^1.5.4"
   }
 }
