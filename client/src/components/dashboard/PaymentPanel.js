@@ -61,7 +61,7 @@ const detectNetwork = phone => {
   return NETWORKS.find(n => n.prefixes.some(p => local.startsWith(p))) || null;
 };
 
-const PaymentPanel = ({ amount = 150000, currency = 'UGX', hostelName, roomNumber }) => {
+const PaymentPanel = ({ amount = 50000, currency = 'UGX', hostelName, roomNumber }) => {
   const [network, setNetwork] = useState(null);
   const [phone, setPhone] = useState('');
   const [preview, setPreview] = useState(false);
