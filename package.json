@@ -12,7 +12,9 @@
     "heroku-postbuild": "NPM_CONFIG_PRODUCTION=false npm install --prefix client && npm run build --prefix client",
     "test:watch": "mocha tests/*.test.js --watch",
     "doctor": "node scripts/doctor.js",
-    "check:email": "node scripts/check-email.js"
+    "check:email": "node scripts/check-email.js",
+    "test:api": "mocha tests/api.*.test.js --exit",
+    "test:unit": "mocha tests/matching.test.js tests/booking.test.js tests/security.test.js tests/visibility.test.js tests/whatsapp.test.js --exit"
   },
   "engines": {
     "node": ">=18.0.0 <23"

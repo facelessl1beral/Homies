@@ -14,22 +14,23 @@ expensive ones at the top.
 ```
         ╱ E2E ╲          ← real browser + real server. WE HAVE NONE.
       ╱─────────╲
-    ╱ Integration ╲      ← several units + real DB.   WE HAVE NONE.
+    ╱ Integration ╲      ← real HTTP + real DB.       47 tests
   ╱─────────────────╲
  ╱     Component     ╲   ← React in a fake DOM.       35 tests
 ╱─────────────────────╲
         Unit             ← one function, no I/O.      105 tests
 ```
 
-**140 automated tests, in two of the four categories.** The gaps are real and
-are covered in §6 rather than glossed over.
+**187 automated tests, in three of the four categories.** The remaining gap is
+real and is covered in §5 rather than glossed over.
 
 | Category | Count | Command | Speed | Needs |
 |---|---|---|---|---|
-| Unit | 105 | `npm test` | ~50 ms | nothing |
+| Unit | 105 | `npm run test:unit` | ~50 ms | nothing |
 | Component | 35 | `npm test --prefix client` | ~4 s | jsdom |
-| Integration | 0 | — | — | a database |
-| End-to-end | 0 | — | — | browser + server + database |
+| Integration | 18 | `npm run test:api` | ~100 ms | nothing |
+| Integration (DB) | 29 | `npm run test:api` | ~3 s | MongoDB |
+| End-to-end | 0 | — | — | browser + server + DB |
 
 ---
 
@@ -113,30 +114,50 @@ A test that has never been seen to fail is not evidence of anything.
 
 ---
 
-## 4. Integration tests — 0
+## 4. Integration tests — 47
 
-**Definition.** Several units together with their real dependencies — routes,
-middleware and the database — asserting on HTTP status codes and response
-bodies. Typically `supertest` plus a test database.
+**Definition.** Several units together with their real dependencies — routing,
+middleware, handlers and the database — asserting on HTTP status codes and
+response bodies. `supertest` mounts the Express app in-process, so no port is
+bound and no server needs starting.
 
-**We have none.** This is the largest gap.
+Split into two tiers by what they need:
 
-**What is therefore unverified:**
+### Tier A — 18 tests, no database (`tests/api.auth.test.js`)
 
-- Route wiring — a handler mounted at the wrong path
-- Middleware order — `hostelAuth` running after the handler rather than before
-- Status codes — a refusal returning 500 instead of 400
-- Mongoose field names — a typo in `User.findByIdAndUpdate` inside a handler
-  would pass every unit test
+Authorisation, token validation, input guards, error shape. All of these
+reject *before* any handler touches mongoose, so they run anywhere with no
+infrastructure. Authorisation is the boundary where being wrong is most
+expensive and also the cheapest to verify, so there is no excuse for leaving
+it uncovered.
 
-The rules are tested. The code calling them is verified by inspection only.
+### Tier B — 29 tests, needs MongoDB (`tests/api.routes.test.js`)
 
-**What it would take:** `supertest` and `mongodb-memory-server`, roughly 20–30
-tests covering auth, the profile endpoints, and the booking flow.
+Registration, login, profile visibility, hostel admin routes, booking
+refusals, swipe reciprocity. These run against `<database>_test`, never the
+real one, and empty every collection between tests.
 
-**Why it was not done:** the project ran out of calendar, and adding a test
-category two days before submission carries its own risk. Stated plainly
-rather than obscured.
+**When MongoDB is unreachable this block SKIPS, and says so.** A suite that
+goes red because a developer has no database running teaches people to ignore
+red output — worse than having no suite. A suite that silently passes when it
+did not run is worse still. Mocha reports them as *pending* and the run prints
+which URI it tried.
+
+### What these catch that nothing else could
+
+- Route wiring — a handler mounted at a path the client does not call
+- Middleware order — auth running after the handler rather than before
+- **Status codes** — a refusal returning 500 instead of 401 or 403
+- Mongoose field names — a typo inside a handler passes every unit test
+- That a write actually landed, not just that the rule said it should
+
+**This suite found a real bug on its first run.** A hostel admin token sent to
+a student route returned **500**, because `middleware/auth.js` assigned
+`req.user = decoded.user` — undefined for a hostel token — and called `next()`
+anyway. The request reached the handler with no user id and failed further in.
+The same accidental-protection pattern already fixed on the admin side was
+still present on the student side, and only a status-code assertion exposed
+it.
 
 ---
 
@@ -166,8 +187,9 @@ protect a future contributor.
 Worth stating directly, because a report of only green results invites the
 assumption that everything else was covered too.
 
-- **No test touches a database.** All 140 run without one.
-- **No test makes an HTTP request.** Route wiring is unverified by automation.
+- **123 of 187 tests run without a database.** The other 29 need one and skip
+  when it is absent.
+- **No test runs against the deployed environment.** Everything is local.
 - **No test runs in a real browser.** CSS, responsive layout, the touch swipe
   gesture and the service worker are all manual.
 - **CORS is unprovable offline** — a preflight only happens in a real browser
@@ -223,11 +245,14 @@ produces tests that agree with the code rather than with the requirement.
 
 ## 9. Likely questions
 
-**"Why no integration tests?"**
-Time. It is the largest gap and §4 states exactly what is unverified because
-of it. The rules the routes depend on are unit tested; the wiring is not.
+**"Why no end-to-end tests?"**
+Automated browser suites are slow, flaky, and expensive to maintain, and they
+pay off across many releases. This project has one. A written checklist
+(docs/TESTING.md §7) executed carefully gives most of the assurance at a
+fraction of the cost — but it depends on a person remembering to run it, which
+§5 states plainly.
 
-**"Isn't 140 tests with no database just testing the easy parts?"**
+**"Isn't testing without a database just testing the easy parts?"**
 The parts covered are where being wrong has consequences — who can see whom,
 who gets which room, what one student can learn about another. Those are the
 decisions worth pinning. But the criticism is fair as far as it goes, and §6
@@ -244,6 +269,5 @@ buggy component: 5 of 20 failed. `booking.test.js` was written before the fix
 and fails entirely against the old handler.
 
 **"What would you add first, with more time?"**
-Supertest integration tests for the booking and auth flows — the largest gap,
-covering the layer where a single mistyped field name currently passes
-everything.
+Playwright or Cypress for the end-to-end journey, and CI so the suite runs on
+every push rather than when someone remembers.

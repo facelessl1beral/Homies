@@ -80,8 +80,10 @@ Terminal 2 — Frontend:
 
 ### Verifying
 
-    npm test                        # 105 unit tests (backend logic)
+    npm test                        # 152 backend tests (unit + API)
     npm test --prefix client        # 35 component tests (React)
+    npm run test:api                # API/integration tests only
+    npm run doctor                  # live environment + data report
     npm run doctor                  # environment + data diagnostic
     npm run build --prefix client   # production build
 
@@ -121,6 +123,7 @@ Result rounded to nearest integer. Verified by hand calculation against live dat
 | [docs/PAYMENTS.md](docs/PAYMENTS.md) | Mobile money prototype and what integration needs |
 | [docs/MOCHA-EXPLAINED.md](docs/MOCHA-EXPLAINED.md) | How the tests work, written to be read cold |
 | [docs/TEST-TAXONOMY.md](docs/TEST-TAXONOMY.md) | Unit / component / integration / E2E — what we have and what we don't |
+| [docs/TESTING-FOR-EVERYONE.md](docs/TESTING-FOR-EVERYONE.md) | Plain-English testing guide, no code required |
 
 ## Known Constraints
 
