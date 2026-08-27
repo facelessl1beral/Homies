@@ -25,7 +25,7 @@ const STEPS = [
     fields: [
       {
         name: 'gender', label: 'Gender', type: 'pills',
-        options: ['Male', 'Female', 'Non-Binary', 'Transgender', 'Intersex', 'Prefer not to say']
+        options: ['Male', 'Female']
       },
       {
         name: 'age', label: 'Age group', type: 'pills',
@@ -104,7 +104,7 @@ const STEPS = [
     fields: [
       {
         name: 'roomieGender', label: 'Roommate gender', type: 'pills',
-        options: ['Male', 'Female', 'Non-Binary', 'Same gender only', "Don't Care"]
+        options: ['Male', 'Female', 'Same gender only', "Don't Care"]
       },
       {
         name: 'roomieAge', label: 'Roommate age group', type: 'pills',
