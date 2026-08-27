@@ -1,2 +1,21 @@
 # dependencies
 /node_modules
+
+# NOTE: /build is deliberately NOT ignored.
+#
+# Render runs `node server.js` and never builds the client, so the compiled
+# bundle in this repository IS the deployed frontend. It must be tracked.
+# A `/build` rule here previously caused files added before it to stay
+# tracked while everything after was silently ignored — the repository ended
+# up with favicon.svg but no index.html, and the deployment looked broken
+# for reasons nothing explained.
+#
+# Any frontend change needs:
+#   cd client && npm run build && cd .. && git add -A && git commit && git push
+
+# Uploaded user photos — personal data, never committed.
+# .gitkeep preserves the directory so multer has somewhere to write.
+public/uploads/*
+!public/uploads/.gitkeep
+build/uploads/*
+!build/uploads/.gitkeep
